@@ -31,17 +31,30 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub type OnProgress<'a> = &'a mut (dyn FnMut(u64, u64) + Send);
 
 pub(crate) fn http_client() -> Result<reqwest::Client> {
-    // reqwest's `rustls-no-provider` requires a process-level crypto
-    // provider before a client can be built. Install ring exactly like
-    // tauri-plugin-updater does, unless the app already chose one.
+    let builder = reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT);
+
+    // reqwest's rustls features hard-depend on `rustls-platform-verifier`, and
+    // with no explicit root store a client uses it. Its Android backend needs a
+    // JNI context this plugin never initializes, which hangs the TLS handshake
+    // there (no error, no response) — iOS/desktop platform verifiers are fine.
+    // Hand reqwest a rustls config backed by the compiled-in Mozilla CA roots
+    // so certificate verification is pure Rust and identical on every platform.
     #[cfg(feature = "rustls-tls")]
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        // Can only fail if a default was installed concurrently — fine.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-    Ok(reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()?)
+    let builder = {
+        // rustls needs a process-level crypto provider; install ring exactly
+        // like tauri-plugin-updater does, unless the app already chose one.
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+        let mut roots = rustls::RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let tls = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        builder.use_preconfigured_tls(tls)
+    };
+
+    Ok(builder.build()?)
 }
 
 /// GET `url` into memory, refusing bodies over `cap` bytes.

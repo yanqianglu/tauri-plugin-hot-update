@@ -17,7 +17,7 @@ default = ["rustls-tls"]
 # is the default because it cross-compiles cleanly for aarch64-apple-ios and
 # aarch64-linux-android (aws-lc-rs, rustls's own default, fights mobile
 # toolchains). `native-tls` is offered for apps standardized on platform TLS.
-rustls-tls = ["reqwest/rustls-no-provider", "dep:rustls"]
+rustls-tls = ["reqwest/rustls-no-provider", "dep:rustls", "dep:webpki-roots"]
 native-tls = ["reqwest/native-tls"]
 # The release-side signing CLI (`hot-update-sign`). Feature-gated so the full
 # `minisign` implementation (secret-key handling) never enters app builds —
@@ -43,6 +43,12 @@ thiserror = "2"
 minisign-verify = "0.2"
 reqwest = { version = "0.13", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
+# Bundled Mozilla CA roots. reqwest's rustls features pull in
+# `rustls-platform-verifier`, whose Android backend needs a JNI context we do
+# not wire up and hangs the TLS handshake there; we hand reqwest a rustls
+# config backed by these roots instead, so verification is self-contained on
+# every platform.
+webpki-roots = { version = "0.26", optional = true }
 sha2 = "0.10"
 tar = "0.4"
 flate2 = "1"
