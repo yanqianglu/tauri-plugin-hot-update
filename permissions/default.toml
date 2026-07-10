@@ -1,0 +1,9 @@
+[default]
+description = "Default permissions for the hot-update plugin"
+permissions = [
+  "allow-check",
+  "allow-download",
+  "allow-notify-app-ready",
+  "allow-current-bundle",
+  "allow-reset",
+]
