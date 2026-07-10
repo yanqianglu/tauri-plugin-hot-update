@@ -34,9 +34,10 @@ use crate::manifest::{self, Manifest};
 use crate::runtime::HotUpdate;
 use crate::{Error, Result};
 
-/// Where updates come from and who is trusted to sign them. WP4 reads this
-/// from the plugin config; WP3 callers construct it directly.
-#[derive(Debug, Clone)]
+/// Where updates come from and who is trusted to sign them. The plugin
+/// setup hook builds this from the validated [`crate::Config`]; Rust-side
+/// callers may construct it directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateConfig {
     /// URL of `manifest.json`. The detached signature is fetched from
     /// `{manifest_url}.minisig`, so the URL must be a plain file URL

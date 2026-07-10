@@ -60,3 +60,5 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 minisign = "0.9"
 time = { version = "0.3", features = ["formatting", "parsing"] }
+# The mock runtime + IPC helpers for command-level tests.
+tauri = { version = "2", features = ["test"] }

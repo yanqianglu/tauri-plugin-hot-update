@@ -22,6 +22,17 @@ pub enum Error {
     #[error("stage refused: {0}")]
     StageRefused(#[from] crate::machine::StageError),
 
+    /// Invalid `plugins.hot-update` configuration. Raised from the plugin's
+    /// setup hook, so it aborts app startup — config ships inside the store
+    /// binary and must be caught on the developer's first run.
+    #[error("hot-update config invalid: {0}")]
+    Config(String),
+
+    /// `check`/`download` was invoked while the plugin is disabled by
+    /// config (`plugins.hot-update.enabled` is false).
+    #[error("hot-update is disabled by config (`plugins.hot-update.enabled` is false)")]
+    Disabled,
+
     /// A configured trusted public key is not valid minisign key material.
     /// This is a hard stop even when other keys in the list would verify:
     /// silently skipping a malformed trust anchor would weaken the key list
