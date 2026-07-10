@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-current-bundle"
+description = "Enables the current_bundle command without any pre-configured scope."
+commands.allow = ["current_bundle"]
+
+[[permission]]
+identifier = "deny-current-bundle"
+description = "Denies the current_bundle command without any pre-configured scope."
+commands.deny = ["current_bundle"]

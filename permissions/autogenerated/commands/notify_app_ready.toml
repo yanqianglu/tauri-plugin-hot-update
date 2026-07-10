@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-notify-app-ready"
+description = "Enables the notify_app_ready command without any pre-configured scope."
+commands.allow = ["notify_app_ready"]
+
+[[permission]]
+identifier = "deny-notify-app-ready"
+description = "Denies the notify_app_ready command without any pre-configured scope."
+commands.deny = ["notify_app_ready"]
