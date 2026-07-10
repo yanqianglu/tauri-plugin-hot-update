@@ -269,9 +269,6 @@ pub enum StageError {
 /// Gates: the version must be strictly above the watermark (downgrade-replay
 /// protection) and the archive hash must not be blacklisted. Replacing an
 /// earlier staged-but-never-armed bundle orphans it (delete effect).
-// Exercised by the transition tests today; the WP3 downloader is the
-// production caller. Remove the allow when it lands.
-#[allow(dead_code)]
 pub fn stage(
     mut state: State,
     seq: u64,

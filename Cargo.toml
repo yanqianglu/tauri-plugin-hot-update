@@ -11,6 +11,24 @@ links = "tauri-plugin-hot-update"
 keywords = ["tauri-plugin", "hot-update", "ota", "codepush", "mobile"]
 categories = ["gui", "os"]
 
+[features]
+default = ["rustls-tls"]
+# TLS backends, mirroring tauri-plugin-updater: rustls with the ring provider
+# is the default because it cross-compiles cleanly for aarch64-apple-ios and
+# aarch64-linux-android (aws-lc-rs, rustls's own default, fights mobile
+# toolchains). `native-tls` is offered for apps standardized on platform TLS.
+rustls-tls = ["reqwest/rustls-no-provider", "dep:rustls"]
+native-tls = ["reqwest/native-tls"]
+# The release-side signing CLI (`hot-update-sign`). Feature-gated so the full
+# `minisign` implementation (secret-key handling) never enters app builds —
+# apps only ever link the verify-only `minisign-verify`.
+cli = ["dep:minisign", "dep:time"]
+
+[[bin]]
+name = "hot-update-sign"
+path = "src/bin/hot-update-sign.rs"
+required-features = ["cli"]
+
 [dependencies]
 tauri = "2"
 log = "0.4"
@@ -18,9 +36,27 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = { version = "1", features = ["serde"] }
 thiserror = "2"
+# Update acquisition (WP3). Version choices follow tauri-plugin-updater — the
+# proven mobile-compatible set: minisign-verify is the pure-Rust verify-only
+# crate tauri's own updater uses; reqwest 0.13 with no default features avoids
+# aws-lc-rs and system-proxy baggage.
+minisign-verify = "0.2"
+reqwest = { version = "0.13", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
+sha2 = "0.10"
+tar = "0.4"
+flate2 = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "rt"] }
+# cli feature only (full minisign implementation + manifest timestamps).
+minisign = { version = "0.9", optional = true }
+time = { version = "0.3", features = ["formatting"], optional = true }
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+minisign = "0.9"
+time = { version = "0.3", features = ["formatting", "parsing"] }

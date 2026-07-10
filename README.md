@@ -6,8 +6,12 @@ assets) to installed apps without a store release, applied on the next cold
 launch, with an automatic anti-brick rollback state machine (a bad bundle can
 never permanently break an installed app — the embedded bundle is the floor).
 
-**Under construction.** The core serving layer and rollback state machine are
-implemented and exhaustively tested; downloader, signing, and the JavaScript
-API are in progress. Not yet published to crates.io / npm.
+**Under construction.** Implemented and exhaustively tested: the core serving
+layer, the rollback state machine, and the update-acquisition pipeline —
+minisign-verified manifests (trusted-key list for rotation, downgrade-replay
+watermark), sha256-verified streaming download, hardened tar.gz extraction
+(symlink/hardlink/traversal rejection, zip-bomb caps), atomic staging, and the
+`hot-update-sign` release CLI (`--features cli`). The JavaScript API (IPC
+commands) is in progress. Not yet published to crates.io / npm.
 
 Dual-licensed under MIT or Apache-2.0, at your option.

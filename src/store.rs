@@ -50,9 +50,7 @@ impl Store {
         }
     }
 
-    // Used by tests today; the WP3 downloader (temp extraction dirs) is the
-    // production caller. Remove the allow when it lands.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -61,7 +59,10 @@ impl Store {
         self.root.join(STATE_FILE)
     }
 
-    fn bundles_dir(&self) -> PathBuf {
+    /// The `bundles/` directory: final `seq-<N>` homes and the update
+    /// pipeline's temp files/dirs (anything non-`seq-<N>` here is swept by
+    /// boot GC, which is what makes crashed downloads self-cleaning).
+    pub(crate) fn bundles_dir(&self) -> PathBuf {
         self.root.join(BUNDLES_DIR)
     }
 
@@ -147,9 +148,6 @@ impl Store {
 
     /// Next seq: strictly above everything the state references and
     /// everything present on disk, so orphan dirs are never aliased.
-    // Exercised by the store tests today; the WP3 downloader is the
-    // production caller. Remove the allow when it lands.
-    #[allow(dead_code)]
     pub fn allocate_seq(&self, state: &State) -> u64 {
         let disk_max = self.present_seqs().into_iter().max().unwrap_or(0);
         let state_max = [state.committed, state.last_good, state.staged, state.booting]

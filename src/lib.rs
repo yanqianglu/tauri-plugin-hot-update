@@ -50,15 +50,29 @@ use tauri::plugin::{Builder as PluginBuilder, TauriPlugin};
 use tauri::{Manager, Runtime};
 
 mod assets;
+mod download;
 mod error;
+mod extract;
 mod machine;
+mod manifest;
 mod runtime;
+/// Release-side signing (the `hot-update-sign` CLI's core). Public only with
+/// the `cli` feature; also compiled for tests so the suite round-trips the
+/// real signing code against the verify path.
+#[cfg(any(feature = "cli", test))]
+pub mod sign;
 mod store;
+#[cfg(test)]
+mod testutil;
+mod update;
 
 pub use assets::HotUpdateAssets;
 pub use error::{Error, Result};
+pub use extract::ExtractError;
 pub use machine::{AckOutcome, StageError};
+pub use manifest::{ArchiveInfo, Manifest};
 pub use runtime::{BundleSource, CurrentBundle, HotUpdate};
+pub use update::{UpdateConfig, UpdateOutcome};
 
 use runtime::Shared;
 

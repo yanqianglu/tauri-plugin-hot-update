@@ -39,6 +39,26 @@ pub(crate) struct Activation {
     /// Version of the active bundle (OTA) or of the embedded assets.
     active_version: Version,
     embedded_version: Version,
+    /// Serializes update pipeline runs ([`crate::update`]): concurrent
+    /// check/download calls must not race seq allocation or double-download.
+    update_lock: tokio::sync::Mutex<()>,
+}
+
+impl Activation {
+    pub(crate) fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// The shell version the compatibility gate checks `minShellVersion`
+    /// against. `version:bump` keeps the embedded frontend in lockstep with
+    /// the app version, so this is also the embedded bundle version.
+    pub(crate) fn embedded_version(&self) -> &Version {
+        &self.embedded_version
+    }
+
+    pub(crate) fn update_lock(&self) -> &tokio::sync::Mutex<()> {
+        &self.update_lock
+    }
 }
 
 impl Shared {
@@ -52,7 +72,7 @@ impl Shared {
         self.activation.get().is_some()
     }
 
-    fn activation(&self) -> Result<&Activation> {
+    pub(crate) fn activation(&self) -> Result<&Activation> {
         self.activation.get().ok_or(Error::NotActive)
     }
 }
@@ -125,6 +145,7 @@ pub(crate) fn initialize(shared: &Shared, root: PathBuf, embedded_version: Versi
         active_dir,
         active_version,
         embedded_version,
+        update_lock: tokio::sync::Mutex::new(()),
     };
     if shared.activation.set(activation).is_err() {
         log::warn!("hot-update: initialize called twice; keeping the first activation");
