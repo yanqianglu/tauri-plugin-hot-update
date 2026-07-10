@@ -3,18 +3,15 @@
 //! the real pipeline into a real on-disk store. No mocks anywhere.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use minisign::KeyPair;
 use semver::Version;
-use tempfile::TempDir;
 
 use super::*;
 use crate::runtime::{self, HotUpdate, Shared};
-use crate::sign::{sign_release, SignOptions};
-use crate::store::Store;
-use crate::testutil::{Route, TestServer};
+use crate::testutil::{Fixture, Route};
 
 fn ver(s: &str) -> Version {
     Version::parse(s).unwrap()
@@ -29,77 +26,6 @@ fn boot(root: &Path, embedded: &str) -> HotUpdate {
 }
 
 fn no_progress(_: u64, _: u64) {}
-
-struct Fixture {
-    tmp: TempDir,
-    root: PathBuf,
-    server: TestServer,
-    keypair: KeyPair,
-}
-
-impl Fixture {
-    fn new() -> Self {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().join("hot-update");
-        let dist = tmp.path().join("dist");
-        fs::create_dir_all(dist.join("assets")).unwrap();
-        fs::write(dist.join("index.html"), b"<html>ota v-next</html>").unwrap();
-        fs::write(dist.join("assets/app.js"), b"console.log('hot')").unwrap();
-        Self {
-            tmp,
-            root,
-            server: TestServer::start(),
-            keypair: KeyPair::generate_unencrypted_keypair().unwrap(),
-        }
-    }
-
-    fn config(&self) -> UpdateConfig {
-        UpdateConfig {
-            manifest_url: self.server.url("/manifest.json"),
-            pubkeys: vec![self.keypair.pk.to_base64()],
-        }
-    }
-
-    /// Sign the dist with the CLI's signing code and serve the three
-    /// artifacts. Returns the manifest and the archive's server path.
-    fn publish(&self, version: &str, min_shell: &str) -> (Manifest, String) {
-        let out = self.tmp.path().join(format!("release-{version}"));
-        let release = sign_release(
-            &SignOptions {
-                dist_dir: &self.tmp.path().join("dist"),
-                version: ver(version),
-                min_shell_version: ver(min_shell),
-                base_url: &self.server.url(""),
-                out_dir: &out,
-            },
-            &self.keypair.sk,
-        )
-        .expect("sign_release");
-        let archive_path = format!("/bundle-{version}.tar.gz");
-        self.server
-            .set("/manifest.json", fs::read(&release.manifest_path).unwrap());
-        self.server.set(
-            "/manifest.json.minisig",
-            fs::read(&release.signature_path).unwrap(),
-        );
-        self.server
-            .set(&archive_path, fs::read(&release.archive_path).unwrap());
-        (release.manifest, archive_path)
-    }
-
-    fn bundle_dir(&self, seq: u64) -> PathBuf {
-        Store::new(self.root.clone()).bundle_dir(seq)
-    }
-
-    fn state(&self) -> serde_json::Value {
-        serde_json::from_slice(&fs::read(self.root.join("state.json")).unwrap()).unwrap()
-    }
-
-    /// Non-`seq-N` debris under bundles/ (leaked temp files/dirs).
-    fn debris(&self) -> Vec<PathBuf> {
-        Store::new(self.root.clone()).foreign_entries()
-    }
-}
 
 // ------------------------------------------------------------ happy path
 
