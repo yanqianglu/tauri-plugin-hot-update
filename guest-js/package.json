@@ -45,6 +45,7 @@
     "codepush",
     "expo-updates",
     "hotfix",
+    "self-hosted",
     "ios",
     "android",
     "mobile"

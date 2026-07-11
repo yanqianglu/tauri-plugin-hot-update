@@ -5,11 +5,14 @@ description = "Hot update / OTA live updates for Tauri v2 mobile and desktop app
 authors = ["Yanqiang Lu"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/yanqianglu/tauri-plugin-hot-update"
+homepage = "https://github.com/yanqianglu/tauri-plugin-hot-update"
+documentation = "https://docs.rs/tauri-plugin-hot-update"
+readme = "README.md"
 edition = "2021"
 rust-version = "1.77.2"
 links = "tauri-plugin-hot-update"
 keywords = ["tauri-plugin", "hot-update", "ota", "codepush", "mobile"]
-categories = ["gui", "os"]
+categories = ["gui", "web-programming", "development-tools"]
 
 [features]
 default = ["rustls-tls"]
