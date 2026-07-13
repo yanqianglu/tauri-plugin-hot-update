@@ -315,6 +315,54 @@ fn staged_ota_newer_than_the_store_update_still_arms() {
     assert_eq!(boot.active, Active::Ota(1));
 }
 
+// ---------------------------------------- prerelease supersession (design §2)
+//
+// OTA bundles are versioned as prereleases of the next native release
+// (`<next-patch>-ota.N`), so a full-app release always outranks its own
+// outstanding OTA bundle by SemVer 2.0 precedence (`1.1.3 > 1.1.3-ota.1`).
+// This is the exact comparison a desktop Sparkle-over-OTA update produces on
+// every launch, and it must be honored at `resolve_boot`.
+
+#[test]
+fn committed_prerelease_is_discarded_when_its_release_ships_embedded() {
+    // The production case: a committed `1.1.3-ota.1` bundle meets an embedded
+    // `1.1.3` (the released base). The release outranks its own prerelease, so
+    // the OTA bundle is discarded and the watermark rises to the release.
+    let state = committed_state(1, "1.1.3-ota.1", "sha-1");
+    let boot = resolve_boot(state, &v("1.1.3"), &present(&[1]));
+    assert_eq!(boot.active, Active::Embedded);
+    assert_eq!(boot.state.committed, None, "committed prerelease discarded");
+    assert_eq!(boot.state.last_good, None);
+    assert_eq!(boot.effects, vec![Effect::DeleteBundle(1)]);
+    assert_eq!(boot.state.max_version_seen, Some(v("1.1.3")));
+}
+
+#[test]
+fn staged_prerelease_is_not_armed_when_its_release_ships_embedded() {
+    // Sparkle staged its update during a long session: on the next boot the
+    // embedded frontend is already `1.1.3`, so a staged `1.1.3-ota.1` (a
+    // prerelease of that same release) must not arm — embedded serves.
+    let boot = resolve_boot(State::default(), &v("1.0.0"), &present(&[]));
+    let (state, _) = stage_ok(boot.state, 1, meta("1.1.3-ota.1", "sha-1"));
+    let boot = resolve_boot(state, &v("1.1.3"), &present(&[1]));
+    assert_eq!(boot.active, Active::Embedded);
+    assert_eq!(boot.state.booting, None, "prerelease of the shipped base never arms");
+    assert_eq!(boot.effects, vec![Effect::DeleteBundle(1)]);
+    assert_eq!(boot.state.max_version_seen, Some(v("1.1.3")));
+}
+
+#[test]
+fn committed_prerelease_ahead_of_embedded_is_kept() {
+    // Guard against over-eager discard: a committed `1.1.3-ota.4` is a
+    // prerelease of the *next* release, and the embedded frontend is still the
+    // previous `1.1.2`. `1.1.3-ota.4 > 1.1.2`, so the OTA bundle keeps serving.
+    let state = committed_state(1, "1.1.3-ota.4", "sha-1");
+    let boot = resolve_boot(state, &v("1.1.2"), &present(&[1]));
+    assert_eq!(boot.active, Active::Ota(1), "OTA still ahead of embedded");
+    assert_eq!(boot.state.committed, Some(1));
+    assert!(boot.effects.is_empty());
+}
+
 // ------------------------------------------------------ watermark monotonicity
 
 #[test]
