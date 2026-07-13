@@ -358,7 +358,15 @@ fn unacked_trial_rolls_back_through_the_command_layer() {
         assert_eq!(invoke(&webview, "current_bundle").unwrap()["source"], "ota");
     }
 
-    // Next boot: rolled back to embedded, archive hash blacklisted.
+    // Two-strike softening (design §4): the first unacked relaunch re-arms the
+    // bundle (still serving OTA) instead of blacklisting it.
+    {
+        let (_app, webview) = build_app(&root, config.clone());
+        assert_eq!(invoke(&webview, "current_bundle").unwrap()["source"], "ota");
+        assert!(raw_state(&root)["failed"].as_array().unwrap().is_empty());
+    }
+
+    // Second unacked boot: rolled back to embedded, archive hash blacklisted.
     let (_app, webview) = build_app(&root, config);
     assert_eq!(
         invoke(&webview, "current_bundle").unwrap(),

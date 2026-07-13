@@ -20,6 +20,9 @@ fn populated_state() -> State {
         last_good: Some(2),
         staged: Some(3),
         booting: None,
+        // Non-default so the roundtrip/wire-format tests actually exercise the
+        // field (a 0 would roundtrip even if serialization dropped it).
+        booting_strikes: 1,
         max_version_seen: Some(Version::parse("1.2.0").unwrap()),
         ..State::default()
     };
@@ -56,10 +59,20 @@ fn state_json_uses_the_designed_camel_case_wire_format() {
     let raw = fs::read(store.root().join("state.json")).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     let obj = json.as_object().unwrap();
-    for key in ["committed", "lastGood", "staged", "booting", "failed", "maxVersionSeen", "versions"] {
+    for key in [
+        "committed",
+        "lastGood",
+        "staged",
+        "booting",
+        "bootingStrikes",
+        "failed",
+        "maxVersionSeen",
+        "versions",
+    ] {
         assert!(obj.contains_key(key), "missing key {key} in {json}");
     }
     assert_eq!(json["committed"], 2);
+    assert_eq!(json["bootingStrikes"], 1);
     assert_eq!(json["maxVersionSeen"], "1.2.0");
     assert_eq!(json["versions"]["2"]["version"], "1.2.0");
     assert_eq!(json["versions"]["2"]["archiveSha256"], "sha-2");
@@ -107,6 +120,33 @@ fn unknown_fields_from_newer_versions_are_tolerated() {
     )
     .unwrap();
     assert_eq!(store.load_state().committed, Some(4));
+}
+
+#[test]
+fn pre_two_strike_state_without_booting_strikes_loads_as_zero() {
+    // An app upgraded from a pre-2-strike plugin has a state.json with no
+    // `bootingStrikes` key. It must deserialize with the field defaulted to 0
+    // (a clean trial), never a parse failure that wipes a committed bundle.
+    let (_tmp, store) = store();
+    fs::create_dir_all(store.root()).unwrap();
+    fs::write(
+        store.root().join("state.json"),
+        br#"{
+            "committed": 2,
+            "lastGood": 2,
+            "staged": null,
+            "booting": 3,
+            "failed": ["sha-dead"],
+            "maxVersionSeen": "1.2.0",
+            "versions": {"3": {"version": "1.3.0", "archiveSha256": "sha-3"}}
+        }"#,
+    )
+    .unwrap();
+    let state = store.load_state();
+    assert_eq!(state.booting_strikes, 0, "missing field defaults to a clean trial");
+    assert_eq!(state.committed, Some(2), "the rest of the state still parses");
+    assert_eq!(state.booting, Some(3));
+    assert!(state.failed.contains("sha-dead"));
 }
 
 #[test]

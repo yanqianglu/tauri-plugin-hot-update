@@ -183,7 +183,8 @@ async fn blacklisted_archive_hash_is_refused_without_downloading() {
         .await
         .unwrap();
     boot(&fx.root, "1.0.0"); // trial boot… crash: no ack
-    boot(&fx.root, "1.0.0"); // rollback: hash blacklisted by the machine
+    boot(&fx.root, "1.0.0"); // first unacked relaunch: re-armed (strike 1)
+    boot(&fx.root, "1.0.0"); // second unacked relaunch: hash blacklisted (strike 2)
 
     let downloads_before = fx.server.request_count("/bundle-1.1.0.tar.gz");
     let outcome = boot(&fx.root, "1.0.0")

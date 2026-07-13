@@ -136,7 +136,15 @@ fn unacked_trial_boot_rolls_back_and_blacklists_by_hash() {
     let boot = resolve_boot(state, &v("1.0.0"), &present(&[1]));
     assert_eq!(boot.state.booting, Some(1));
 
-    // Next boot arrives with `booting` still set: the trial never acked.
+    // Two-strike softening (design §4): the first unacked launch re-arms the
+    // same bundle rather than condemning it — a desktop app is often quit
+    // before notifyAppReady().
+    let boot = resolve_boot(boot.state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(boot.rolled_back, None, "re-armed, not yet rolled back");
+    assert_eq!(boot.state.booting, Some(1));
+    assert!(boot.state.failed.is_empty(), "not blacklisted on the first miss");
+
+    // The second unacked launch condemns it: blacklist by archive hash + revert.
     let boot = resolve_boot(boot.state, &v("1.0.0"), &present(&[1]));
     assert_eq!(boot.rolled_back, Some(1));
     assert_eq!(boot.active, Active::Embedded, "no committed bundle to fall back to");
@@ -153,6 +161,10 @@ fn rollback_falls_back_to_the_committed_bundle() {
     let boot = resolve_boot(state, &v("1.0.0"), &present(&[1, 2]));
     assert_eq!(boot.active, Active::Ota(2));
 
+    // Two unacked launches condemn seq 2 (design §4); the first only re-arms.
+    let boot = resolve_boot(boot.state, &v("1.0.0"), &present(&[1, 2]));
+    assert_eq!(boot.active, Active::Ota(2), "re-armed for a second trial");
+    assert_eq!(boot.rolled_back, None);
     let boot = resolve_boot(boot.state, &v("1.0.0"), &present(&[1, 2]));
     assert_eq!(boot.rolled_back, Some(2));
     assert_eq!(boot.active, Active::Ota(1), "last-good keeps serving");
@@ -166,6 +178,8 @@ fn failed_hash_is_never_staged_again() {
     let state = committed_state(1, "1.1.0", "sha-1");
     let (state, _) = stage_ok(state, 2, meta("1.2.0", "sha-2"));
     let boot = resolve_boot(state, &v("1.0.0"), &present(&[1, 2]));
+    // Two unacked launches to cross the blacklist threshold (design §4).
+    let boot = resolve_boot(boot.state, &v("1.0.0"), &present(&[1, 2]));
     let boot = resolve_boot(boot.state, &v("1.0.0"), &present(&[1, 2]));
     assert!(boot.state.failed.contains("sha-2"));
 
@@ -199,8 +213,11 @@ fn crash_loop_converges_to_committed() {
         let (s, _) = stage_ok(state, seq, meta(&format!("1.{seq}.0"), sha));
         let armed = resolve_boot(s, &v("1.0.0"), &present(&[1, seq]));
         assert_eq!(armed.active, Active::Ota(seq));
-        // Crash: no ack. Next boot rolls back.
-        let rolled = resolve_boot(armed.state, &v("1.0.0"), &present(&[1, seq]));
+        // Crash: no ack. Under the two-strike rule the first unacked boot only
+        // re-arms; the second rolls back to the committed bundle.
+        let rearmed = resolve_boot(armed.state, &v("1.0.0"), &present(&[1, seq]));
+        assert_eq!(rearmed.active, Active::Ota(seq), "re-armed once");
+        let rolled = resolve_boot(rearmed.state, &v("1.0.0"), &present(&[1, seq]));
         assert_eq!(rolled.active, Active::Ota(1));
         state = rolled.state;
     }
@@ -218,7 +235,10 @@ fn crash_loop_with_no_committed_converges_to_embedded() {
     let boot = resolve_boot(State::default(), &v("1.0.0"), &present(&[]));
     let (state, _) = stage_ok(boot.state, 1, meta("1.1.0", "sha-1"));
     let armed = resolve_boot(state, &v("1.0.0"), &present(&[1]));
-    let rolled = resolve_boot(armed.state, &v("1.0.0"), &present(&[1]));
+    // Two-strike rule: the first unacked boot re-arms, the second rolls back.
+    let rearmed = resolve_boot(armed.state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(rearmed.active, Active::Ota(1), "re-armed once before rollback");
+    let rolled = resolve_boot(rearmed.state, &v("1.0.0"), &present(&[1]));
     assert_eq!(rolled.active, Active::Embedded);
 
     let again = resolve_boot(rolled.state.clone(), &v("1.0.0"), &present(&[]));
@@ -236,6 +256,142 @@ fn rollback_of_a_seq_without_metadata_does_not_panic() {
     assert_eq!(boot.rolled_back, Some(9));
     assert_eq!(boot.active, Active::Embedded);
     assert!(boot.state.failed.is_empty(), "no hash known, nothing to blacklist");
+}
+
+// ------------------------------------------- two-strike rollback (design §4)
+//
+// Desktop sessions are long and launches rare, so a *good* bundle whose
+// process quit before `notifyAppReady()` must not be blacklisted on a single
+// miss. A bundle is re-armed once (strike 1) and only blacklisted after a
+// *second* consecutive unacked launch (strike 2). Absence of the ack across
+// launches is still the only failure signal — no boot timer.
+
+#[test]
+fn first_unacked_launch_rearms_the_same_seq_without_blacklisting() {
+    let boot = resolve_boot(State::default(), &v("1.0.0"), &present(&[]));
+    let (state, _) = stage_ok(boot.state, 1, meta("1.1.0", "sha-1"));
+    let armed = resolve_boot(state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(armed.state.booting, Some(1));
+    assert_eq!(armed.state.booting_strikes, 0, "a fresh trial starts at zero");
+
+    // First unacked launch: re-armed, same seq, nothing blacklisted.
+    let rearmed = resolve_boot(armed.state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(rearmed.active, Active::Ota(1), "served again for a second trial");
+    assert_eq!(rearmed.state.booting, Some(1), "same seq re-armed");
+    assert_eq!(rearmed.state.booting_strikes, 1);
+    assert_eq!(rearmed.rolled_back, None, "not a rollback yet");
+    assert!(rearmed.state.failed.is_empty(), "not blacklisted on the first miss");
+    assert!(rearmed.effects.is_empty(), "bundle dir kept for the retry");
+}
+
+#[test]
+fn second_unacked_launch_blacklists_by_hash_and_rolls_back() {
+    let boot = resolve_boot(State::default(), &v("1.0.0"), &present(&[]));
+    let (state, _) = stage_ok(boot.state, 1, meta("1.1.0", "sha-1"));
+    let armed = resolve_boot(state, &v("1.0.0"), &present(&[1]));
+    let rearmed = resolve_boot(armed.state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(rearmed.state.booting_strikes, 1);
+
+    // Second unacked launch: now the bundle is condemned.
+    let rolled = resolve_boot(rearmed.state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(rolled.rolled_back, Some(1));
+    assert_eq!(rolled.active, Active::Embedded, "no committed bundle to fall back to");
+    assert_eq!(rolled.state.booting, None);
+    assert_eq!(rolled.state.booting_strikes, 0, "counter cleared on blacklist");
+    assert!(rolled.state.failed.contains("sha-1"), "blacklisted by archive hash");
+    assert_eq!(rolled.effects, vec![Effect::DeleteBundle(1)]);
+    assert!(!rolled.state.versions.contains_key(&1));
+}
+
+#[test]
+fn ack_on_the_second_trial_clears_strikes_and_never_blacklists() {
+    let boot = resolve_boot(State::default(), &v("1.0.0"), &present(&[]));
+    let (state, _) = stage_ok(boot.state, 1, meta("1.1.0", "sha-1"));
+    let armed = resolve_boot(state, &v("1.0.0"), &present(&[1]));
+    // One unacked launch leaves a strike on the board.
+    let rearmed = resolve_boot(armed.state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(rearmed.state.booting_strikes, 1);
+
+    // This launch DOES ack: the bundle is good after all — commit and reset.
+    let (state, outcome, _) = ack(rearmed.state, rearmed.active);
+    assert_eq!(outcome, AckOutcome::Committed(1));
+    assert_eq!(state.committed, Some(1));
+    assert_eq!(state.booting, None);
+    assert_eq!(state.booting_strikes, 0, "a committed bundle clears its strikes");
+    assert!(state.failed.is_empty(), "an acked bundle is never blacklisted");
+}
+
+#[test]
+fn promoting_a_fresh_bundle_clears_a_leftover_strike_count() {
+    // A stray strike count must never bleed into a newly promoted bundle, or
+    // that bundle would be condemned after a single miss instead of two.
+    let state = committed_state(1, "1.1.0", "sha-1");
+    let (mut state, _) = stage_ok(state, 2, meta("1.2.0", "sha-2"));
+    state.booting_strikes = 7; // defensive: a leftover the ack should have cleared
+
+    let armed = resolve_boot(state, &v("1.0.0"), &present(&[1, 2]));
+    assert_eq!(armed.state.booting, Some(2), "staged bundle promoted");
+    assert_eq!(armed.state.booting_strikes, 0, "promotion resets the counter");
+
+    // Prove the fresh trial really started clean: its FIRST miss only re-arms.
+    let rearmed = resolve_boot(armed.state, &v("1.0.0"), &present(&[1, 2]));
+    assert_eq!(rearmed.active, Active::Ota(2));
+    assert_eq!(rearmed.state.booting_strikes, 1);
+    assert!(rearmed.state.failed.is_empty(), "not blacklisted on the first miss");
+}
+
+#[test]
+fn strike_one_rearm_does_not_promote_a_waiting_staged_bundle() {
+    // While a bundle is on its second trial (booting occupied), a freshly
+    // staged bundle must wait its turn rather than jump the queue.
+    let boot = resolve_boot(State::default(), &v("1.0.0"), &present(&[]));
+    let (state, _) = stage_ok(boot.state, 1, meta("1.1.0", "sha-1"));
+    let armed = resolve_boot(state, &v("1.0.0"), &present(&[1]));
+    assert_eq!(armed.state.booting, Some(1));
+
+    // A newer bundle stages during the first trial session.
+    let (state, _) = stage_ok(armed.state, 2, meta("1.2.0", "sha-2"));
+    assert_eq!(state.staged, Some(2));
+
+    // First unacked launch: seq 1 is re-armed (strike 1); seq 2 stays staged.
+    let rearmed = resolve_boot(state, &v("1.0.0"), &present(&[1, 2]));
+    assert_eq!(rearmed.active, Active::Ota(1), "the trial bundle keeps its turn");
+    assert_eq!(rearmed.state.booting, Some(1));
+    assert_eq!(rearmed.state.booting_strikes, 1);
+    assert_eq!(rearmed.state.staged, Some(2), "the queued bundle waits for the next boot");
+    assert!(rearmed.effects.is_empty(), "neither bundle GC'd");
+
+    // Second unacked launch: seq 1 is blacklisted AND seq 2 finally promotes.
+    let next = resolve_boot(rearmed.state, &v("1.0.0"), &present(&[1, 2]));
+    assert_eq!(next.rolled_back, Some(1));
+    assert!(next.state.failed.contains("sha-1"));
+    assert_eq!(next.state.booting, Some(2), "queued bundle promoted after the rollback");
+    assert_eq!(next.state.booting_strikes, 0, "fresh trial for seq 2");
+    assert_eq!(next.active, Active::Ota(2));
+    assert_eq!(next.effects, vec![Effect::DeleteBundle(1)]);
+}
+
+#[test]
+fn a_store_update_landing_mid_trial_supersedes_the_booting_bundle() {
+    // A Sparkle/native update can ship a newer embedded frontend while an OTA
+    // trial is still mid-flight. On the next launch the stale trial bundle
+    // must NOT be re-served (that would regress the frontend below the freshly
+    // installed native version); the newer embedded wins, and the
+    // good-but-stale bundle is discarded — not blacklisted.
+    let boot = resolve_boot(State::default(), &v("1.1.2"), &present(&[]));
+    let (state, _) = stage_ok(boot.state, 1, meta("1.1.3-ota.1", "sha-1"));
+    let armed = resolve_boot(state, &v("1.1.2"), &present(&[1]));
+    assert_eq!(armed.active, Active::Ota(1), "trial armed under the old embedded");
+    assert_eq!(armed.state.booting, Some(1));
+
+    // Native update to 1.1.3 lands; the trial never acked.
+    let boot = resolve_boot(armed.state, &v("1.1.3"), &present(&[1]));
+    assert_eq!(boot.active, Active::Embedded, "the newer embedded frontend wins");
+    assert_eq!(boot.state.booting, None);
+    assert_eq!(boot.rolled_back, None, "supersession is not a failure rollback");
+    assert!(boot.state.failed.is_empty(), "a superseded bundle is not blacklisted");
+    assert_eq!(boot.effects, vec![Effect::DeleteBundle(1)]);
+    assert_eq!(boot.state.max_version_seen, Some(v("1.1.3")));
 }
 
 // --------------------------------- download finishing during a trial session

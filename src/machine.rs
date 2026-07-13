@@ -9,14 +9,19 @@
 //!
 //! ```text
 //! download ──▶ staged ──(next cold boot, persisted BEFORE serving)──▶ booting
-//!                                 booting ──(notifyAppReady ack)──▶ committed
-//!                                 booting ──(next boot, no ack)───▶ failed (by archive sha256)
+//!                            booting ──(notifyAppReady ack)──────▶ committed
+//!                            booting ──(1st boot, no ack)──▶ booting (re-armed)
+//!                            booting ──(2nd boot, no ack)──▶ failed (by archive sha256)
 //! ```
 //!
 //! Invariants enforced here:
-//! - Absence of the ack **is** the failure signal: a `booting` pointer found
-//!   at boot means the previous launch never acked → that bundle's archive
-//!   sha256 is blacklisted and serving falls back to committed/embedded.
+//! - Absence of the ack **is** the failure signal (no boot timer): a `booting`
+//!   pointer found at boot means the previous launch never acked. Desktop
+//!   launches are rare and sessions long, so a single miss only *re-arms* the
+//!   same bundle for one more trial; a *second* consecutive unacked launch
+//!   blacklists its archive sha256 and serving falls back to
+//!   committed/embedded. A bundle a newer embedded frontend has caught up to
+//!   is discarded outright (not blacklisted) — the embedded frontend wins.
 //! - `max_version_seen` is a monotonic watermark (downgrade-replay and
 //!   embedded-newer-than-OTA protection). It only ever rises.
 //! - Failed archive hashes are never staged or armed again.
@@ -56,8 +61,17 @@ pub struct State {
     /// Downloaded and extracted, waiting for the next cold boot.
     pub staged: Option<u64>,
     /// Armed for a trial boot. Present at boot time ⇒ the previous trial
-    /// never acked ⇒ rollback.
+    /// never acked.
     pub booting: Option<u64>,
+    /// Consecutive unacked launches of the current `booting` bundle. Desktop
+    /// launches are rare and sessions long, so a *good* bundle whose process
+    /// quit before `notifyAppReady()` must not be blacklisted on a single
+    /// miss: the bundle is re-armed once (strike 1) and only blacklisted after
+    /// a *second* consecutive unacked launch (strike 2). Reset to 0 on commit
+    /// and whenever a fresh bundle is promoted from `staged`. `#[serde(default)]`
+    /// so a pre-2-strike `state.json` (which lacks the field) loads as 0.
+    #[serde(default)]
+    pub booting_strikes: u32,
     /// Blacklist of archive sha256 hashes that failed a trial boot.
     pub failed: BTreeSet<String>,
     /// Monotonic watermark: max(embedded version, highest committed OTA
@@ -112,12 +126,41 @@ pub struct BootOutcome {
 /// `present` is the set of bundle dirs that actually exist on disk; pointers
 /// to absent dirs are dropped rather than armed/served.
 pub fn resolve_boot(mut state: State, embedded_version: &Version, present: &BTreeSet<u64>) -> BootOutcome {
-    // 1. Unacked trial boot from a previous launch ⇒ that bundle failed.
-    //    Blacklist by archive sha256; the dir itself is swept by GC below.
-    let rolled_back = state.booting.take();
-    if let Some(seq) = rolled_back {
-        if let Some(meta) = state.versions.get(&seq) {
-            state.failed.insert(meta.archive_sha256.clone());
+    // 1. Unacked trial boot from a previous launch. The bundle pointed at by
+    //    `booting` was armed last launch and never acked. Two-strike softening
+    //    (design §4, "desktop-hardened rollback"): desktop launches are rare
+    //    and a good bundle is often quit before `notifyAppReady()`, so a
+    //    single miss must not condemn it.
+    let mut rolled_back = None;
+    if let Some(seq) = state.booting.take() {
+        let meta = state.versions.get(&seq).cloned();
+        let superseded = meta
+            .as_ref()
+            .is_some_and(|m| m.version <= *embedded_version);
+
+        if superseded {
+            // A newer embedded frontend (e.g. a Sparkle/native update that
+            // landed while this trial was mid-flight) has caught up to the
+            // trial bundle. It is stale, not broken: discard it (GC sweeps the
+            // dir) and let embedded win — no blacklist, not a failure rollback.
+            state.booting_strikes = 0;
+        } else if state.booting_strikes == 0 && present.contains(&seq) && meta.is_some() {
+            // Strike 1: still applicable and on disk. Give it exactly one more
+            // launch to ack before condemning it. `booting` stays occupied, so
+            // step 4 will not promote a waiting staged bundle over it.
+            state.booting = Some(seq);
+            state.booting_strikes = 1;
+        } else {
+            // Strike 2 (a genuine second unacked launch), a bundle whose dir
+            // vanished, or a corrupt pointer with no metadata: this bundle can
+            // never be trusted again. Blacklist its archive sha256 when known
+            // (a fixed redeploy ships under a new hash and is unaffected) and
+            // roll back to committed/embedded.
+            if let Some(m) = &meta {
+                state.failed.insert(m.archive_sha256.clone());
+            }
+            state.booting_strikes = 0;
+            rolled_back = Some(seq);
         }
     }
 
@@ -152,7 +195,15 @@ pub fn resolve_boot(mut state: State, embedded_version: &Version, present: &BTre
     //    blacklist. The download gates already checked these, but arming is
     //    the last line of defense and the situation can legitimately change
     //    between staging and boot (e.g. a store update raised the watermark).
-    if let Some(seq) = state.staged.take() {
+    //    Skipped while `booting` is still occupied by a strike-1 re-arm: the
+    //    queued bundle stays staged and waits for the next boot rather than
+    //    jumping ahead of the bundle currently on its second trial.
+    let promote = if state.booting.is_some() {
+        None
+    } else {
+        state.staged.take()
+    };
+    if let Some(seq) = promote {
         let arm = present.contains(&seq)
             && state.versions.get(&seq).is_some_and(|meta| {
                 !state.failed.contains(&meta.archive_sha256)
@@ -163,6 +214,9 @@ pub fn resolve_boot(mut state: State, embedded_version: &Version, present: &BTre
             });
         if arm {
             state.booting = Some(seq);
+            // A freshly promoted bundle starts its trial with a clean strike
+            // count, even if a leftover count somehow survived a prior commit.
+            state.booting_strikes = 0;
         }
         // Not armable ⇒ silently discarded; GC removes the dir.
     }
@@ -231,6 +285,9 @@ pub fn ack(mut state: State, booted: Active) -> (State, AckOutcome, Vec<Effect>)
     }
 
     state.booting = None;
+    // A bundle that acks once is good: clear any strike accumulated during a
+    // re-armed trial so it can never contaminate the next bundle's trial.
+    state.booting_strikes = 0;
     let previous = state.committed.replace(seq);
     state.last_good = Some(seq);
     if let Some(meta) = state.versions.get(&seq) {

@@ -123,6 +123,17 @@ fn unacked_trial_rolls_back_blacklists_and_deletes_the_bundle() {
     let (shared, _) = boot(&root, "1.0.0"); // trial boot, crash: no ack
     assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 1)));
 
+    // Two-strike softening (design §4): the first unacked relaunch re-arms the
+    // same bundle instead of blacklisting it (desktop quits happen before ack).
+    let (shared, _) = boot(&root, "1.0.0");
+    assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 1)), "re-armed, still serving");
+    assert!(
+        raw_state(&root)["failed"].as_array().unwrap().is_empty(),
+        "not yet blacklisted after a single miss"
+    );
+    assert_eq!(raw_state(&root)["bootingStrikes"], 1, "strike recorded on disk");
+
+    // The second unacked relaunch rolls back to embedded and blacklists.
     let (shared, hot_update) = boot(&root, "1.0.0");
     assert_eq!(shared.active_dir(), None, "rolled back to embedded");
     assert_eq!(raw_state(&root)["failed"][0], "sha-1");
@@ -146,7 +157,9 @@ fn crash_loop_converges_to_the_committed_bundle_on_disk() {
         stage_bundle(&root, seq, version, sha);
         let (shared, _) = boot(&root, "1.0.0"); // trial boot, no ack
         assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, seq)));
-        let (shared, _) = boot(&root, "1.0.0"); // rollback
+        let (shared, _) = boot(&root, "1.0.0"); // first unacked relaunch: re-armed
+        assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, seq)));
+        let (shared, _) = boot(&root, "1.0.0"); // second unacked relaunch: rollback
         assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 1)));
     }
 
