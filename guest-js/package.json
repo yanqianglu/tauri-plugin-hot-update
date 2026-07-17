@@ -1,6 +1,6 @@
 {
   "name": "tauri-plugin-hot-update-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript API for tauri-plugin-hot-update — hot update / OTA live updates (CodePush-style, self-hosted) for Tauri v2 mobile and desktop apps",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
