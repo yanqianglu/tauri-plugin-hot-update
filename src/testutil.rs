@@ -150,10 +150,7 @@ impl TestServer {
     }
 
     pub fn set_route(&self, path: &str, route: Route) {
-        self.routes
-            .lock()
-            .unwrap()
-            .insert(path.to_string(), route);
+        self.routes.lock().unwrap().insert(path.to_string(), route);
     }
 
     /// Every request path served so far, in order.

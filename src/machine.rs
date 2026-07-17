@@ -125,7 +125,11 @@ pub struct BootOutcome {
 ///
 /// `present` is the set of bundle dirs that actually exist on disk; pointers
 /// to absent dirs are dropped rather than armed/served.
-pub fn resolve_boot(mut state: State, embedded_version: &Version, present: &BTreeSet<u64>) -> BootOutcome {
+pub fn resolve_boot(
+    mut state: State,
+    embedded_version: &Version,
+    present: &BTreeSet<u64>,
+) -> BootOutcome {
     // 1. Unacked trial boot from a previous launch. The bundle pointed at by
     //    `booting` was armed last launch and never acked. Two-strike softening
     //    (design §4, "desktop-hardened rollback"): desktop launches are rare
@@ -314,7 +318,10 @@ pub fn ack(mut state: State, booted: Active) -> (State, AckOutcome, Vec<Effect>)
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StageError {
     #[error("bundle version {version} is not newer than the watermark {watermark}")]
-    VersionNotNewer { version: Version, watermark: Version },
+    VersionNotNewer {
+        version: Version,
+        watermark: Version,
+    },
     #[error("archive sha256 {0} previously failed a trial boot and is blacklisted")]
     HashBlacklisted(String),
     #[error("seq {0} is already referenced by the state")]

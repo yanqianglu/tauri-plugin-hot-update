@@ -37,9 +37,19 @@ fn ver(s: &str) -> Version {
 fn try_build_app(root: &Path, plugin_config: Option<Value>) -> tauri::Result<App<MockRuntime>> {
     let mut context = mock_context(noop_assets());
     if let Some(config) = plugin_config {
-        context.config_mut().plugins.0.insert("hot-update".into(), config);
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("hot-update".into(), config);
     }
-    for cmd in ["check", "download", "notify_app_ready", "current_bundle", "reset"] {
+    for cmd in [
+        "check",
+        "download",
+        "notify_app_ready",
+        "current_bundle",
+        "reset",
+    ] {
         context
             .runtime_authority_mut()
             .__allow_command(format!("plugin:hot-update|{cmd}"), ExecutionContext::Local);
@@ -144,44 +154,72 @@ fn update_outcome_wire_shapes_are_pinned() {
             }),
         ),
         (
-            UpdateOutcome::Staged { seq: 3, version: ver("1.1.0") },
+            UpdateOutcome::Staged {
+                seq: 3,
+                version: ver("1.1.0"),
+            },
             json!({ "status": "staged", "seq": 3, "version": "1.1.0" }),
         ),
         (
-            UpdateOutcome::UpToDate { offered: ver("1.0.0"), watermark: ver("1.1.0") },
+            UpdateOutcome::UpToDate {
+                offered: ver("1.0.0"),
+                watermark: ver("1.1.0"),
+            },
             json!({ "status": "upToDate", "offered": "1.0.0", "watermark": "1.1.0" }),
         ),
         (
-            UpdateOutcome::Blacklisted { version: ver("1.1.0") },
+            UpdateOutcome::Blacklisted {
+                version: ver("1.1.0"),
+            },
             json!({ "status": "blacklisted", "version": "1.1.0" }),
         ),
         (
-            UpdateOutcome::ShellTooOld { required: ver("2.0.0"), shell: ver("1.0.0") },
+            UpdateOutcome::ShellTooOld {
+                required: ver("2.0.0"),
+                shell: ver("1.0.0"),
+            },
             json!({ "status": "shellTooOld", "required": "2.0.0", "shell": "1.0.0" }),
         ),
         (
-            UpdateOutcome::AlreadyStaged { seq: 3, version: ver("1.1.0") },
+            UpdateOutcome::AlreadyStaged {
+                seq: 3,
+                version: ver("1.1.0"),
+            },
             json!({ "status": "alreadyStaged", "seq": 3, "version": "1.1.0" }),
         ),
     ];
     for (outcome, expected) in cases {
-        assert_eq!(serde_json::to_value(&outcome).unwrap(), expected, "{outcome:?}");
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap(),
+            expected,
+            "{outcome:?}"
+        );
     }
 }
 
 #[test]
 fn ack_result_wire_shapes_are_pinned() {
     let cases = [
-        (AckResult::Committed { seq: 2 }, json!({ "status": "committed", "seq": 2 })),
+        (
+            AckResult::Committed { seq: 2 },
+            json!({ "status": "committed", "seq": 2 }),
+        ),
         (
             AckResult::AlreadyCommitted { seq: 2 },
             json!({ "status": "alreadyCommitted", "seq": 2 }),
         ),
         (AckResult::EmbeddedNoop, json!({ "status": "embeddedNoop" })),
-        (AckResult::Stale { seq: 2 }, json!({ "status": "stale", "seq": 2 })),
+        (
+            AckResult::Stale { seq: 2 },
+            json!({ "status": "stale", "seq": 2 }),
+        ),
     ];
     for (result, expected) in cases {
-        assert_eq!(serde_json::to_value(result).unwrap(), expected, "{result:?}");
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            expected,
+            "{result:?}"
+        );
     }
 }
 
@@ -209,11 +247,17 @@ fn current_bundle_wire_shapes_are_pinned() {
 
 #[test]
 fn download_progress_wire_shape_is_pinned() {
-    let progress = DownloadProgress { downloaded: 1024, total: 4096 };
+    let progress = DownloadProgress {
+        downloaded: 1024,
+        total: 4096,
+    };
     let value = serde_json::to_value(progress).unwrap();
     assert_eq!(value, json!({ "downloaded": 1024, "total": 4096 }));
     // Round-trips for Rust-side listeners of PROGRESS_EVENT.
-    assert_eq!(serde_json::from_value::<DownloadProgress>(value).unwrap(), progress);
+    assert_eq!(
+        serde_json::from_value::<DownloadProgress>(value).unwrap(),
+        progress
+    );
 }
 
 // ------------------------------------------------------------- throttle
@@ -222,13 +266,19 @@ fn download_progress_wire_shape_is_pinned() {
 fn throttle_gates_by_time_but_always_passes_first_and_final() {
     let mut throttle = ProgressThrottle::new(Duration::from_secs(3600));
     assert!(throttle.should_emit(1, 100), "first chunk always emits");
-    assert!(!throttle.should_emit(2, 100), "within the interval: suppressed");
+    assert!(
+        !throttle.should_emit(2, 100),
+        "within the interval: suppressed"
+    );
     assert!(!throttle.should_emit(50, 100));
     assert!(throttle.should_emit(100, 100), "final chunk always emits");
 
     let mut unthrottled = ProgressThrottle::new(Duration::ZERO);
     assert!(unthrottled.should_emit(1, 100));
-    assert!(unthrottled.should_emit(2, 100), "elapsed >= zero interval: emits");
+    assert!(
+        unthrottled.should_emit(2, 100),
+        "elapsed >= zero interval: emits"
+    );
 }
 
 // ------------------------------------------------------------ IPC round-trips
@@ -258,7 +308,9 @@ fn download_via_ipc_stages_a_signed_release_and_emits_progress() {
     let seen: Arc<Mutex<Vec<DownloadProgress>>> = Arc::default();
     let sink = Arc::clone(&seen);
     app.listen_any(PROGRESS_EVENT, move |event| {
-        sink.lock().unwrap().push(serde_json::from_str(event.payload()).unwrap());
+        sink.lock()
+            .unwrap()
+            .push(serde_json::from_str(event.payload()).unwrap());
     });
 
     // check() first: available, nothing downloaded.
@@ -385,7 +437,10 @@ fn reset_via_ipc_reverts_to_embedded_on_the_next_launch() {
     }
     {
         let (_app, webview) = build_app(&fx.root, enabled_config(&fx));
-        assert_eq!(invoke(&webview, "notify_app_ready").unwrap()["status"], "committed");
+        assert_eq!(
+            invoke(&webview, "notify_app_ready").unwrap()["status"],
+            "committed"
+        );
         assert_eq!(invoke(&webview, "reset").unwrap(), Value::Null);
         // The running process keeps serving what it booted…
         assert_eq!(invoke(&webview, "current_bundle").unwrap()["source"], "ota");
@@ -394,7 +449,10 @@ fn reset_via_ipc_reverts_to_embedded_on_the_next_launch() {
 
     // …and the next launch is back on embedded.
     let (_app, webview) = build_app(&fx.root, enabled_config(&fx));
-    assert_eq!(invoke(&webview, "current_bundle").unwrap()["source"], "embedded");
+    assert_eq!(
+        invoke(&webview, "current_bundle").unwrap()["source"],
+        "embedded"
+    );
 }
 
 // ------------------------------------------------------------- dark-ship
@@ -435,7 +493,10 @@ fn missing_plugin_config_aborts_startup() {
     let err = try_build_app(&tmp.path().join("hot-update"), None).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("plugins.hot-update"), "{msg}");
-    assert!(msg.contains("enabled"), "must point at the dark-ship escape: {msg}");
+    assert!(
+        msg.contains("enabled"),
+        "must point at the dark-ship escape: {msg}"
+    );
 }
 
 #[test]
@@ -454,7 +515,9 @@ fn invalid_config_aborts_startup() {
         "manifestUrl": "https://updates.example.com/manifest.json?v=2",
         "pubkeys": ["irrelevant"],
     });
-    let msg = try_build_app(&root, Some(query_url)).unwrap_err().to_string();
+    let msg = try_build_app(&root, Some(query_url))
+        .unwrap_err()
+        .to_string();
     assert!(msg.contains("query string"), "{msg}");
 
     let typo = json!({
@@ -462,5 +525,8 @@ fn invalid_config_aborts_startup() {
         "pubKeys": ["RW..."],
     });
     let msg = try_build_app(&root, Some(typo)).unwrap_err().to_string();
-    assert!(msg.contains("pubKeys"), "typos must not be silently ignored: {msg}");
+    assert!(
+        msg.contains("pubKeys"),
+        "typos must not be silently ignored: {msg}"
+    );
 }

@@ -143,8 +143,15 @@ fn pre_two_strike_state_without_booting_strikes_loads_as_zero() {
     )
     .unwrap();
     let state = store.load_state();
-    assert_eq!(state.booting_strikes, 0, "missing field defaults to a clean trial");
-    assert_eq!(state.committed, Some(2), "the rest of the state still parses");
+    assert_eq!(
+        state.booting_strikes, 0,
+        "missing field defaults to a clean trial"
+    );
+    assert_eq!(
+        state.committed,
+        Some(2),
+        "the rest of the state still parses"
+    );
     assert_eq!(state.booting, Some(3));
     assert!(state.failed.contains("sha-dead"));
 }
@@ -171,9 +178,7 @@ fn update_persists_the_transition_result() {
         version: Version::parse("1.1.0").unwrap(),
         archive_sha256: "sha-1".to_string(),
     };
-    let result = store
-        .update(|state| stage(state, 1, meta.clone()))
-        .unwrap();
+    let result = store.update(|state| stage(state, 1, meta.clone())).unwrap();
     assert!(result.is_ok());
     let reloaded = store.load_state();
     assert_eq!(reloaded.staged, Some(1));
@@ -185,7 +190,10 @@ fn update_persists_the_transition_result() {
 #[test]
 fn bundle_dir_follows_the_seq_layout() {
     let (_tmp, store) = store();
-    assert_eq!(store.bundle_dir(7), store.root().join("bundles").join("seq-7"));
+    assert_eq!(
+        store.bundle_dir(7),
+        store.root().join("bundles").join("seq-7")
+    );
 }
 
 #[test]
@@ -205,7 +213,11 @@ fn present_seqs_sees_only_real_seq_dirs() {
         .into_iter()
         .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(foreign.len(), 3, "seq-x, tmp-extract, and the seq-9 file: {foreign:?}");
+    assert_eq!(
+        foreign.len(),
+        3,
+        "seq-x, tmp-extract, and the seq-9 file: {foreign:?}"
+    );
 }
 
 #[test]

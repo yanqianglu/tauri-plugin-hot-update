@@ -60,7 +60,10 @@ async fn end_to_end_signed_release_is_verified_extracted_and_staged() {
     let state = fx.state();
     assert_eq!(state["staged"], 1);
     assert_eq!(state["versions"]["1"]["version"], "1.1.0");
-    assert_eq!(state["versions"]["1"]["archiveSha256"], manifest.archive.sha256);
+    assert_eq!(
+        state["versions"]["1"]["archiveSha256"],
+        manifest.archive.sha256
+    );
     assert_eq!(
         fs::read(fx.bundle_dir(1).join("index.html")).unwrap(),
         b"<html>ota v-next</html>"
@@ -69,7 +72,11 @@ async fn end_to_end_signed_release_is_verified_extracted_and_staged() {
         fs::read(fx.bundle_dir(1).join("assets/app.js")).unwrap(),
         b"console.log('hot')"
     );
-    assert!(fx.debris().is_empty(), "no temp files may leak: {:?}", fx.debris());
+    assert!(
+        fx.debris().is_empty(),
+        "no temp files may leak: {:?}",
+        fx.debris()
+    );
 
     // Next cold launch arms and serves it; the ack commits it.
     let hot_update = boot(&fx.root, "1.0.0");
@@ -96,7 +103,10 @@ async fn progress_is_reported_per_chunk_up_to_the_exact_total() {
         .await
         .unwrap();
     assert!(!seen.is_empty());
-    assert!(seen.windows(2).all(|w| w[0].0 < w[1].0), "monotonic: {seen:?}");
+    assert!(
+        seen.windows(2).all(|w| w[0].0 < w[1].0),
+        "monotonic: {seen:?}"
+    );
     assert!(seen.iter().all(|(_, t)| *t == manifest.archive.size));
     assert_eq!(seen.last().unwrap().0, manifest.archive.size);
 }
@@ -197,7 +207,10 @@ async fn blacklisted_archive_hash_is_refused_without_downloading() {
             version: ver("1.1.0")
         }
     );
-    assert_eq!(fx.server.request_count("/bundle-1.1.0.tar.gz"), downloads_before);
+    assert_eq!(
+        fx.server.request_count("/bundle-1.1.0.tar.gz"),
+        downloads_before
+    );
 }
 
 #[tokio::test]
@@ -227,16 +240,19 @@ async fn tampered_manifest_is_rejected_and_nothing_is_downloaded() {
     let fx = Fixture::new();
     fx.publish("1.1.0", "1.0.0");
     // Rewrite the served manifest (version bump) keeping the signature.
-    let tampered = fs::read_to_string(
-        fx.tmp.path().join("release-1.1.0/manifest.json"),
-    )
-    .unwrap()
-    .replace("1.1.0", "9.9.9");
+    let tampered = fs::read_to_string(fx.tmp.path().join("release-1.1.0/manifest.json"))
+        .unwrap()
+        .replace("1.1.0", "9.9.9");
     fx.server.set("/manifest.json", tampered.into_bytes());
 
     let hot_update = boot(&fx.root, "1.0.0");
-    let result = hot_update.check_and_download(&fx.config(), no_progress).await;
-    assert!(matches!(result, Err(Error::ManifestSignature(_))), "{result:?}");
+    let result = hot_update
+        .check_and_download(&fx.config(), no_progress)
+        .await;
+    assert!(
+        matches!(result, Err(Error::ManifestSignature(_))),
+        "{result:?}"
+    );
     assert_eq!(fx.server.request_count("/bundle-1.1.0.tar.gz"), 0);
     assert!(!fx.root.join("state.json").exists() || fx.state()["staged"].is_null());
 }
@@ -252,7 +268,10 @@ async fn manifest_signed_by_an_untrusted_key_is_rejected() {
         ..fx.config()
     };
     let result = hot_update.check(&config).await;
-    assert!(matches!(result, Err(Error::ManifestSignature(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::ManifestSignature(_))),
+        "{result:?}"
+    );
 }
 
 #[tokio::test]
@@ -275,17 +294,24 @@ async fn rotated_second_trusted_key_verifies_over_the_wire() {
 async fn tampered_archive_is_rejected_by_sha256_and_leaves_no_trace() {
     let fx = Fixture::new();
     let (_, archive_path) = fx.publish("1.1.0", "1.0.0");
-    let mut bytes =
-        fs::read(fx.tmp.path().join("release-1.1.0/bundle-1.1.0.tar.gz")).unwrap();
+    let mut bytes = fs::read(fx.tmp.path().join("release-1.1.0/bundle-1.1.0.tar.gz")).unwrap();
     bytes[42] ^= 0xff; // same size, different content
     fx.server.set(&archive_path, bytes);
 
     let hot_update = boot(&fx.root, "1.0.0");
-    let result = hot_update.check_and_download(&fx.config(), no_progress).await;
-    assert!(matches!(result, Err(Error::ArchiveSha256 { .. })), "{result:?}");
+    let result = hot_update
+        .check_and_download(&fx.config(), no_progress)
+        .await;
+    assert!(
+        matches!(result, Err(Error::ArchiveSha256 { .. })),
+        "{result:?}"
+    );
     assert_eq!(fx.state()["staged"], serde_json::Value::Null);
     assert!(!fx.bundle_dir(1).exists());
-    assert!(fx.debris().is_empty(), "partial download must be cleaned up");
+    assert!(
+        fx.debris().is_empty(),
+        "partial download must be cleaned up"
+    );
 }
 
 #[tokio::test]
@@ -303,14 +329,19 @@ async fn short_download_fails_cleanly_and_a_retry_restarts_from_scratch() {
     );
 
     let hot_update = boot(&fx.root, "1.0.0");
-    let result = hot_update.check_and_download(&fx.config(), no_progress).await;
+    let result = hot_update
+        .check_and_download(&fx.config(), no_progress)
+        .await;
     // Premature close surfaces as a transport error or a size mismatch,
     // depending on where the stream breaks — both are hard stops.
     assert!(
         matches!(result, Err(Error::Http(_)) | Err(Error::ArchiveSize { .. })),
         "{result:?}"
     );
-    assert!(fx.debris().is_empty(), "no .part file may survive the failure");
+    assert!(
+        fx.debris().is_empty(),
+        "no .part file may survive the failure"
+    );
 
     // Restart from scratch succeeds once the server serves the full body.
     fx.server.set(&archive_path, full);
@@ -318,20 +349,24 @@ async fn short_download_fails_cleanly_and_a_retry_restarts_from_scratch() {
         .check_and_download(&fx.config(), no_progress)
         .await
         .unwrap();
-    assert!(matches!(outcome, UpdateOutcome::Staged { seq: 1, .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, UpdateOutcome::Staged { seq: 1, .. }),
+        "{outcome:?}"
+    );
 }
 
 #[tokio::test]
 async fn archive_stream_longer_than_the_signed_size_is_aborted() {
     let fx = Fixture::new();
     let (manifest, archive_path) = fx.publish("1.1.0", "1.0.0");
-    let mut bytes =
-        fs::read(fx.tmp.path().join("release-1.1.0/bundle-1.1.0.tar.gz")).unwrap();
+    let mut bytes = fs::read(fx.tmp.path().join("release-1.1.0/bundle-1.1.0.tar.gz")).unwrap();
     bytes.extend_from_slice(&[0u8; 4096]); // padded past the signed size
     fx.server.set(&archive_path, bytes);
 
     let hot_update = boot(&fx.root, "1.0.0");
-    let result = hot_update.check_and_download(&fx.config(), no_progress).await;
+    let result = hot_update
+        .check_and_download(&fx.config(), no_progress)
+        .await;
     match result {
         Err(Error::ArchiveSize { declared, actual }) => {
             assert_eq!(declared, manifest.archive.size);
@@ -363,7 +398,10 @@ async fn oversized_manifest_body_is_refused() {
     );
     let hot_update = boot(&fx.root, "1.0.0");
     let result = hot_update.check(&fx.config()).await;
-    assert!(matches!(result, Err(Error::ResponseTooLarge { .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::ResponseTooLarge { .. })),
+        "{result:?}"
+    );
 }
 
 #[tokio::test]
@@ -375,7 +413,10 @@ async fn update_api_errors_cleanly_before_initialization() {
         manifest_url: "http://127.0.0.1:1/manifest.json".into(),
         pubkeys: vec![],
     };
-    assert!(matches!(hot_update.check(&fx_config).await, Err(Error::NotActive)));
+    assert!(matches!(
+        hot_update.check(&fx_config).await,
+        Err(Error::NotActive)
+    ));
     assert!(matches!(
         hot_update.check_and_download(&fx_config, no_progress).await,
         Err(Error::NotActive)

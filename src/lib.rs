@@ -104,7 +104,10 @@ pub fn install<R: Runtime>(context: &mut tauri::Context<R>) -> HotUpdateHandle {
     // Two-step swap through a placeholder: the wrapper must own the original
     // embedded box before it can be constructed.
     let embedded = context.set_assets(Box::new(assets::PlaceholderAssets));
-    context.set_assets(Box::new(HotUpdateAssets::new(embedded, Arc::clone(&shared))));
+    context.set_assets(Box::new(HotUpdateAssets::new(
+        embedded,
+        Arc::clone(&shared),
+    )));
     HotUpdateHandle { shared }
 }
 

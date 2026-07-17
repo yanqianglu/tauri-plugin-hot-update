@@ -193,9 +193,9 @@ impl HotUpdate {
             AckOutcome::Committed(seq) => {
                 log::info!("hot-update: bundle seq {seq} committed as last-good")
             }
-            AckOutcome::Stale(seq) => log::warn!(
-                "hot-update: ack for seq {seq} no longer matches on-disk state; ignored"
-            ),
+            AckOutcome::Stale(seq) => {
+                log::warn!("hot-update: ack for seq {seq} no longer matches on-disk state; ignored")
+            }
             AckOutcome::AlreadyCommitted(_) | AckOutcome::EmbeddedNoop => {}
         }
         Ok(outcome)

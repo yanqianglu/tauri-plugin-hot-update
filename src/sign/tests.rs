@@ -85,7 +85,10 @@ fn a_release_signed_by_a_different_key_does_not_verify() {
     let manifest_bytes = fs::read(&release.manifest_path).unwrap();
     let signature = fs::read_to_string(&release.signature_path).unwrap();
     let result = verify_and_parse(&manifest_bytes, &signature, &[other.pk.to_base64()]);
-    assert!(matches!(result, Err(crate::Error::ManifestSignature(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(crate::Error::ManifestSignature(_))),
+        "{result:?}"
+    );
 }
 
 #[test]

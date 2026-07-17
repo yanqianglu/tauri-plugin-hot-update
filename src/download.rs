@@ -58,11 +58,7 @@ pub(crate) fn http_client() -> Result<reqwest::Client> {
 }
 
 /// GET `url` into memory, refusing bodies over `cap` bytes.
-pub(crate) async fn fetch_capped(
-    client: &reqwest::Client,
-    url: &str,
-    cap: u64,
-) -> Result<Vec<u8>> {
+pub(crate) async fn fetch_capped(client: &reqwest::Client, url: &str, cap: u64) -> Result<Vec<u8>> {
     let mut response = checked_get(client, url).await?;
     let mut body: Vec<u8> = Vec::new();
     while let Some(chunk) = response.chunk().await? {

@@ -59,7 +59,11 @@ impl Config {
         if !self.enabled {
             return Ok(None);
         }
-        let url = self.manifest_url.as_deref().map(str::trim).unwrap_or_default();
+        let url = self
+            .manifest_url
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
         if url.is_empty() {
             return Err(Error::Config(
                 "`manifestUrl` is required when the plugin is enabled".into(),

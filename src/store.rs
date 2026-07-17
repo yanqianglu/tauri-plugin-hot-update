@@ -79,7 +79,10 @@ impl Store {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return State::default(),
             Err(e) => {
-                log::warn!("hot-update: failed to read {}: {e}; starting fresh", path.display());
+                log::warn!(
+                    "hot-update: failed to read {}: {e}; starting fresh",
+                    path.display()
+                );
                 return State::default();
             }
         };
@@ -150,12 +153,17 @@ impl Store {
     /// everything present on disk, so orphan dirs are never aliased.
     pub fn allocate_seq(&self, state: &State) -> u64 {
         let disk_max = self.present_seqs().into_iter().max().unwrap_or(0);
-        let state_max = [state.committed, state.last_good, state.staged, state.booting]
-            .into_iter()
-            .flatten()
-            .chain(state.versions.keys().copied())
-            .max()
-            .unwrap_or(0);
+        let state_max = [
+            state.committed,
+            state.last_good,
+            state.staged,
+            state.booting,
+        ]
+        .into_iter()
+        .flatten()
+        .chain(state.versions.keys().copied())
+        .max()
+        .unwrap_or(0);
         disk_max.max(state_max) + 1
     }
 

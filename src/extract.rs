@@ -55,7 +55,10 @@ pub enum ExtractError {
     #[error("archive read/write failed: {0}")]
     Io(#[from] io::Error),
     #[error("archive entry {path:?} has forbidden type {entry_type} (only plain files and directories are allowed)")]
-    ForbiddenEntryType { path: String, entry_type: &'static str },
+    ForbiddenEntryType {
+        path: String,
+        entry_type: &'static str,
+    },
     #[error("archive entry path {path:?} is unsafe (absolute, traversing, or non-normal)")]
     UnsafePath { path: String },
     #[error("archive exceeds the {limit}-entry cap")]

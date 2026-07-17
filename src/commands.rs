@@ -59,7 +59,11 @@ impl CommandConfig {
 /// internally-tagged serde cannot represent — and because wire shapes belong
 /// to the IPC layer, not the pure state machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub(crate) enum AckResult {
     Committed { seq: u64 },
     AlreadyCommitted { seq: u64 },

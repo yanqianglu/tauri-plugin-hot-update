@@ -36,7 +36,9 @@ impl FakeEmbedded {
 
 impl Assets<Wry> for FakeEmbedded {
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
-        self.files.get(key.as_ref()).map(|bytes| Cow::Borrowed(bytes.as_slice()))
+        self.files
+            .get(key.as_ref())
+            .map(|bytes| Cow::Borrowed(bytes.as_slice()))
     }
 
     fn iter(&self) -> Box<AssetsIter<'_>> {
@@ -80,7 +82,11 @@ fn activate_bundle(root: &Path, files: &[(&str, &str)]) -> Arc<Shared> {
         .unwrap();
 
     let shared = Arc::new(Shared::default());
-    initialize(&shared, root.to_path_buf(), Version::parse("1.0.0").unwrap());
+    initialize(
+        &shared,
+        root.to_path_buf(),
+        Version::parse("1.0.0").unwrap(),
+    );
     assert_eq!(shared.active_dir(), Some(&store.bundle_dir(1)));
     shared
 }
@@ -123,7 +129,10 @@ fn active_bundle_wins_over_embedded_per_file() {
     );
 
     assert_eq!(get_str(&assets, "/index.html").as_deref(), Some("OTA HTML"));
-    assert_eq!(get_str(&assets, "/assets/app.js").as_deref(), Some("OTA JS"));
+    assert_eq!(
+        get_str(&assets, "/assets/app.js").as_deref(),
+        Some("OTA JS")
+    );
     // Missing in the bundle → per-file fallback to embedded.
     assert_eq!(
         get_str(&assets, "/only-embedded.css").as_deref(),

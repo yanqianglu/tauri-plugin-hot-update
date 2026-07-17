@@ -13,7 +13,10 @@ fn parse(value: serde_json::Value) -> serde_json::Result<Config> {
 }
 
 fn valid_pubkey() -> String {
-    KeyPair::generate_unencrypted_keypair().unwrap().pk.to_base64()
+    KeyPair::generate_unencrypted_keypair()
+        .unwrap()
+        .pk
+        .to_base64()
 }
 
 #[test]
@@ -26,7 +29,10 @@ fn full_config_validates_into_the_update_config() {
     .unwrap();
     assert!(config.enabled, "enabled defaults to true");
     let update = config.validate().unwrap().expect("enabled config");
-    assert_eq!(update.manifest_url, "https://updates.example.com/manifest.json");
+    assert_eq!(
+        update.manifest_url,
+        "https://updates.example.com/manifest.json"
+    );
     assert_eq!(update.pubkeys, vec![key]);
 }
 
@@ -55,14 +61,23 @@ fn disabled_config_is_inert_and_never_validated() {
     }))
     .unwrap();
     assert_eq!(config.validate().unwrap(), None);
-    assert_eq!(parse(json!({ "enabled": false })).unwrap().validate().unwrap(), None);
+    assert_eq!(
+        parse(json!({ "enabled": false }))
+            .unwrap()
+            .validate()
+            .unwrap(),
+        None
+    );
 }
 
 #[test]
 fn missing_manifest_url_is_an_init_error_when_enabled() {
     let config = parse(json!({ "pubkeys": [valid_pubkey()] })).unwrap();
     let err = config.validate().unwrap_err();
-    assert!(matches!(&err, Error::Config(msg) if msg.contains("manifestUrl")), "{err}");
+    assert!(
+        matches!(&err, Error::Config(msg) if msg.contains("manifestUrl")),
+        "{err}"
+    );
 
     let config = parse(json!({ "manifestUrl": "  ", "pubkeys": [valid_pubkey()] })).unwrap();
     assert!(matches!(config.validate(), Err(Error::Config(_))));
@@ -89,7 +104,10 @@ fn non_http_and_query_string_urls_are_init_errors() {
 fn missing_or_malformed_pubkeys_are_init_errors() {
     let config = parse(json!({ "manifestUrl": "https://u.example.com/manifest.json" })).unwrap();
     let err = config.validate().unwrap_err();
-    assert!(matches!(&err, Error::Config(msg) if msg.contains("pubkeys")), "{err}");
+    assert!(
+        matches!(&err, Error::Config(msg) if msg.contains("pubkeys")),
+        "{err}"
+    );
 
     // One malformed key among valid ones is still a hard stop: a broken
     // trust anchor must surface, not be silently skipped.

@@ -53,7 +53,11 @@ pub struct UpdateConfig {
 /// not errors: they are the pipeline saying "this manifest is not for us",
 /// with the reason preserved for the app/UI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum UpdateOutcome {
     /// `check()` only: a verified, applicable update is offered.
     Available { manifest: Manifest },
@@ -63,7 +67,10 @@ pub enum UpdateOutcome {
     /// The offered version is not strictly newer than the watermark. This is
     /// both the everyday "no update" answer and the downgrade-replay
     /// rejection — an old validly-signed manifest lands here.
-    UpToDate { offered: Version, watermark: Version },
+    UpToDate {
+        offered: Version,
+        watermark: Version,
+    },
     /// The offered archive hash previously failed a trial boot and is
     /// permanently blacklisted; a fixed release ships under a new hash.
     Blacklisted { version: Version },
@@ -85,10 +92,12 @@ impl HotUpdate {
         let client = http_client()?;
         let manifest = fetch_verified_manifest(&client, config).await?;
         let state = activation.store().load_state();
-        Ok(match gate(&manifest, &state, activation.embedded_version()) {
-            Some(refusal) => refusal,
-            None => UpdateOutcome::Available { manifest },
-        })
+        Ok(
+            match gate(&manifest, &state, activation.embedded_version()) {
+                Some(refusal) => refusal,
+                None => UpdateOutcome::Available { manifest },
+            },
+        )
     }
 
     /// The full pipeline: check, and if an update is applicable, download,
@@ -107,8 +116,11 @@ impl HotUpdate {
         let client = http_client()?;
         let manifest = fetch_verified_manifest(&client, config).await?;
         let store = activation.store();
-        if let Some(refusal) = gate(&manifest, &store.load_state(), activation.embedded_version())
-        {
+        if let Some(refusal) = gate(
+            &manifest,
+            &store.load_state(),
+            activation.embedded_version(),
+        ) {
             return Ok(refusal);
         }
 

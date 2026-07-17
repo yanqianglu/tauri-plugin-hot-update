@@ -59,7 +59,10 @@ fn tampered_manifest_bytes_are_rejected() {
     // The attacker rewrites the version but keeps the valid signature.
     let tampered = DESIGN_DOC_MANIFEST.replace("1.2.0", "9.9.9");
     let result = verify_and_parse(tampered.as_bytes(), &signature, &[kp.pk.to_base64()]);
-    assert!(matches!(result, Err(Error::ManifestSignature(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::ManifestSignature(_))),
+        "{result:?}"
+    );
 }
 
 #[test]
@@ -68,7 +71,10 @@ fn signature_by_an_untrusted_key_is_rejected() {
     let attacker = keypair();
     let bytes = DESIGN_DOC_MANIFEST.as_bytes();
     let result = verify_and_parse(bytes, &sign(&attacker, bytes), &[trusted.pk.to_base64()]);
-    assert!(matches!(result, Err(Error::ManifestSignature(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::ManifestSignature(_))),
+        "{result:?}"
+    );
 }
 
 #[test]
@@ -88,7 +94,10 @@ fn garbage_signature_data_is_rejected() {
     let bytes = DESIGN_DOC_MANIFEST.as_bytes();
     for garbage in ["", "not a minisig", "untrusted comment: x\nAAAA"] {
         let result = verify_and_parse(bytes, garbage, &[kp.pk.to_base64()]);
-        assert!(matches!(result, Err(Error::ManifestSignature(_))), "{result:?}");
+        assert!(
+            matches!(result, Err(Error::ManifestSignature(_))),
+            "{result:?}"
+        );
     }
 }
 
@@ -136,9 +145,15 @@ fn validly_signed_but_malformed_json_fails_parse() {
 #[test]
 fn unknown_manifest_fields_are_tolerated() {
     let kp = keypair();
-    let bytes = DESIGN_DOC_MANIFEST
-        .replace("{\n  \"version\"", "{\n  \"futureField\": {\"a\": 1},\n  \"version\"");
-    let result = verify_and_parse(bytes.as_bytes(), &sign(&kp, bytes.as_bytes()), &[kp.pk.to_base64()]);
+    let bytes = DESIGN_DOC_MANIFEST.replace(
+        "{\n  \"version\"",
+        "{\n  \"futureField\": {\"a\": 1},\n  \"version\"",
+    );
+    let result = verify_and_parse(
+        bytes.as_bytes(),
+        &sign(&kp, bytes.as_bytes()),
+        &[kp.pk.to_base64()],
+    );
     assert!(result.is_ok(), "{result:?}");
 }
 
@@ -150,9 +165,15 @@ fn malformed_sha256_is_refused() {
             "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c",
             bad_sha,
         );
-        let result =
-            verify_and_parse(json.as_bytes(), &sign(&kp, json.as_bytes()), &[kp.pk.to_base64()]);
-        assert!(matches!(result, Err(Error::ManifestInvalid(_))), "{result:?}");
+        let result = verify_and_parse(
+            json.as_bytes(),
+            &sign(&kp, json.as_bytes()),
+            &[kp.pk.to_base64()],
+        );
+        assert!(
+            matches!(result, Err(Error::ManifestInvalid(_))),
+            "{result:?}"
+        );
     }
 }
 
@@ -163,9 +184,12 @@ fn sha256_is_canonicalized_to_lowercase() {
         "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c",
         "B5BB9D8014A0F9B1D61E21E796D78DCCDF1352F23CD32812F4850B878AE4944C",
     );
-    let manifest =
-        verify_and_parse(json.as_bytes(), &sign(&kp, json.as_bytes()), &[kp.pk.to_base64()])
-            .expect("verify");
+    let manifest = verify_and_parse(
+        json.as_bytes(),
+        &sign(&kp, json.as_bytes()),
+        &[kp.pk.to_base64()],
+    )
+    .expect("verify");
     assert_eq!(
         manifest.archive.sha256,
         "b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c"
@@ -175,10 +199,19 @@ fn sha256_is_canonicalized_to_lowercase() {
 #[test]
 fn nonsensical_archive_sizes_are_refused() {
     let kp = keypair();
-    for bad_size in ["0", &(crate::extract::MAX_UNCOMPRESSED_BYTES + 1).to_string()] {
+    for bad_size in [
+        "0",
+        &(crate::extract::MAX_UNCOMPRESSED_BYTES + 1).to_string(),
+    ] {
         let json = DESIGN_DOC_MANIFEST.replace("4194304", bad_size);
-        let result =
-            verify_and_parse(json.as_bytes(), &sign(&kp, json.as_bytes()), &[kp.pk.to_base64()]);
-        assert!(matches!(result, Err(Error::ManifestInvalid(_))), "{result:?}");
+        let result = verify_and_parse(
+            json.as_bytes(),
+            &sign(&kp, json.as_bytes()),
+            &[kp.pk.to_base64()],
+        );
+        assert!(
+            matches!(result, Err(Error::ManifestInvalid(_))),
+            "{result:?}"
+        );
     }
 }

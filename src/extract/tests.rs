@@ -92,7 +92,10 @@ fn plain_files_extract_with_content_parents_and_default_permissions() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(target.join("index.html")).unwrap().permissions().mode();
+        let mode = fs::metadata(target.join("index.html"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o111, 0, "0755 header mode must not be preserved");
     }
 }
@@ -104,7 +107,8 @@ fn directory_entries_are_created() {
     header.set_entry_type(tar::EntryType::Directory);
     header.set_size(0);
     header.set_mode(0o755);
-    tar.append_data(&mut header, "static/fonts", &[][..]).unwrap();
+    tar.append_data(&mut header, "static/fonts", &[][..])
+        .unwrap();
     let (_tmp, archive, target) = setup(&gz(&tar.into_inner().unwrap()));
 
     extract_tar_gz(&archive, &target).expect("extract");
@@ -160,7 +164,10 @@ fn symlink_entries_are_rejected() {
     assert!(
         matches!(
             result,
-            Err(ExtractError::ForbiddenEntryType { entry_type: "symlink", .. })
+            Err(ExtractError::ForbiddenEntryType {
+                entry_type: "symlink",
+                ..
+            })
         ),
         "{result:?}"
     );
@@ -175,7 +182,10 @@ fn hardlink_entries_are_rejected() {
     assert!(
         matches!(
             result,
-            Err(ExtractError::ForbiddenEntryType { entry_type: "hardlink", .. })
+            Err(ExtractError::ForbiddenEntryType {
+                entry_type: "hardlink",
+                ..
+            })
         ),
         "{result:?}"
     );
@@ -208,7 +218,12 @@ fn device_fifo_and_sparse_entries_are_rejected() {
 fn entry_count_cap_is_enforced() {
     let mut raw = Vec::new();
     for i in 0..4 {
-        raw.extend(raw_entry(format!("f{i}").as_bytes(), tar::EntryType::Regular, 0, b""));
+        raw.extend(raw_entry(
+            format!("f{i}").as_bytes(),
+            tar::EntryType::Regular,
+            0,
+            b"",
+        ));
     }
     let bytes = gz(&raw);
     let (_tmp, archive, target) = setup(&bytes);
@@ -235,7 +250,12 @@ fn production_size_cap_refuses_a_lying_giant_header_before_reading_data() {
     let (_tmp, archive, target) = setup(&bytes);
     let result = extract_tar_gz(&archive, &target);
     assert!(
-        matches!(result, Err(ExtractError::TooLarge { limit: MAX_UNCOMPRESSED_BYTES })),
+        matches!(
+            result,
+            Err(ExtractError::TooLarge {
+                limit: MAX_UNCOMPRESSED_BYTES
+            })
+        ),
         "{result:?}"
     );
 }
@@ -243,8 +263,18 @@ fn production_size_cap_refuses_a_lying_giant_header_before_reading_data() {
 #[test]
 fn total_size_cap_accumulates_across_entries() {
     let mut raw = Vec::new();
-    raw.extend(raw_entry(b"a.bin", tar::EntryType::Regular, 600, &[0u8; 600]));
-    raw.extend(raw_entry(b"b.bin", tar::EntryType::Regular, 600, &[0u8; 600]));
+    raw.extend(raw_entry(
+        b"a.bin",
+        tar::EntryType::Regular,
+        600,
+        &[0u8; 600],
+    ));
+    raw.extend(raw_entry(
+        b"b.bin",
+        tar::EntryType::Regular,
+        600,
+        &[0u8; 600],
+    ));
     let bytes = gz(&raw);
     let (_tmp, archive, target) = setup(&bytes);
     let result = extract_with_limits(&archive, &target, small_limits(10, 1000));

@@ -90,7 +90,10 @@ fn full_trial_cycle_arms_persists_then_commits() {
     assert_eq!(raw["booting"], 1, "arm persisted before serving");
     assert_eq!(raw["staged"], serde_json::Value::Null);
 
-    assert_eq!(hot_update.notify_app_ready().unwrap(), AckOutcome::Committed(1));
+    assert_eq!(
+        hot_update.notify_app_ready().unwrap(),
+        AckOutcome::Committed(1)
+    );
     let raw = raw_state(&root);
     assert_eq!(raw["committed"], 1);
     assert_eq!(raw["lastGood"], 1);
@@ -126,12 +129,20 @@ fn unacked_trial_rolls_back_blacklists_and_deletes_the_bundle() {
     // Two-strike softening (design §4): the first unacked relaunch re-arms the
     // same bundle instead of blacklisting it (desktop quits happen before ack).
     let (shared, _) = boot(&root, "1.0.0");
-    assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 1)), "re-armed, still serving");
+    assert_eq!(
+        shared.active_dir(),
+        Some(&bundle_dir(&root, 1)),
+        "re-armed, still serving"
+    );
     assert!(
         raw_state(&root)["failed"].as_array().unwrap().is_empty(),
         "not yet blacklisted after a single miss"
     );
-    assert_eq!(raw_state(&root)["bootingStrikes"], 1, "strike recorded on disk");
+    assert_eq!(
+        raw_state(&root)["bootingStrikes"],
+        1,
+        "strike recorded on disk"
+    );
 
     // The second unacked relaunch rolls back to embedded and blacklists.
     let (shared, hot_update) = boot(&root, "1.0.0");
@@ -183,7 +194,10 @@ fn download_landing_mid_trial_stays_staged_while_the_trial_commits() {
     assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 1)));
     stage_bundle(&root, 2, "1.2.0", "sha-2"); // download finishes mid-session
 
-    assert_eq!(hot_update.notify_app_ready().unwrap(), AckOutcome::Committed(1));
+    assert_eq!(
+        hot_update.notify_app_ready().unwrap(),
+        AckOutcome::Committed(1)
+    );
     let raw = raw_state(&root);
     assert_eq!(raw["committed"], 1, "the booted seq committed");
     assert_eq!(raw["staged"], 2, "fresh download untouched by the ack");
@@ -191,7 +205,10 @@ fn download_landing_mid_trial_stays_staged_while_the_trial_commits() {
     // Next launch: seq 2 gets its own trial; committing it replaces seq 1.
     let (shared, hot_update) = boot(&root, "1.0.0");
     assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 2)));
-    assert_eq!(hot_update.notify_app_ready().unwrap(), AckOutcome::Committed(2));
+    assert_eq!(
+        hot_update.notify_app_ready().unwrap(),
+        AckOutcome::Committed(2)
+    );
     assert!(!bundle_dir(&root, 1).exists(), "replaced last-good deleted");
 }
 
@@ -229,7 +246,10 @@ fn corrupt_state_json_recovers_to_embedded_and_a_fresh_file() {
 
     let (shared, hot_update) = boot(&root, "1.0.0");
     assert_eq!(shared.active_dir(), None, "fresh state serves embedded");
-    assert!(!bundle_dir(&root, 1).exists(), "now-unreferenced bundle GC'd");
+    assert!(
+        !bundle_dir(&root, 1).exists(),
+        "now-unreferenced bundle GC'd"
+    );
     let raw = raw_state(&root); // parses again: file was rewritten valid
     assert_eq!(raw["maxVersionSeen"], "1.0.0");
     assert_eq!(
@@ -251,7 +271,11 @@ fn store_update_shipping_newer_assets_discards_the_ota_bundle() {
 
     // The user installs a store release whose embedded frontend is 1.2.0.
     let (shared, hot_update) = boot(&root, "1.2.0");
-    assert_eq!(shared.active_dir(), None, "store release must not be shadowed");
+    assert_eq!(
+        shared.active_dir(),
+        None,
+        "store release must not be shadowed"
+    );
     assert!(!bundle_dir(&root, 1).exists());
     let current = hot_update.current_bundle().unwrap();
     assert_eq!(current.source, BundleSource::Embedded);
@@ -283,7 +307,10 @@ fn unpersistable_arm_serves_last_good_instead_of_the_staged_bundle() {
     // detection — so seq 2 must NOT be served; last-good (seq 1) is.
     assert_eq!(shared.active_dir(), Some(&bundle_dir(&root, 1)));
     let raw = raw_state(&root);
-    assert_eq!(raw["staged"], 2, "on-disk state untouched; retried next boot");
+    assert_eq!(
+        raw["staged"], 2,
+        "on-disk state untouched; retried next boot"
+    );
     assert_eq!(raw["booting"], serde_json::Value::Null);
 }
 
@@ -304,7 +331,10 @@ fn reset_returns_to_factory_and_spares_the_live_bundle_until_next_boot() {
 
     let raw = raw_state(&root);
     assert_eq!(raw["committed"], serde_json::Value::Null);
-    assert_eq!(raw["maxVersionSeen"], "1.0.0", "watermark restarts from embedded");
+    assert_eq!(
+        raw["maxVersionSeen"], "1.0.0",
+        "watermark restarts from embedded"
+    );
     assert!(
         bundle_dir(&root, 1).exists(),
         "live bundle not yanked from under the webview"
@@ -322,8 +352,14 @@ fn runtime_api_errors_cleanly_before_initialization() {
     let hot_update = HotUpdate {
         shared: Arc::new(Shared::default()),
     };
-    assert!(matches!(hot_update.notify_app_ready(), Err(crate::Error::NotActive)));
-    assert!(matches!(hot_update.current_bundle(), Err(crate::Error::NotActive)));
+    assert!(matches!(
+        hot_update.notify_app_ready(),
+        Err(crate::Error::NotActive)
+    ));
+    assert!(matches!(
+        hot_update.current_bundle(),
+        Err(crate::Error::NotActive)
+    ));
     assert!(matches!(hot_update.reset(), Err(crate::Error::NotActive)));
 }
 

@@ -86,7 +86,8 @@ pub fn verify_and_parse(
 /// key material ([`verify_and_parse`] re-parses at use). Same hard-stop rule
 /// as verification: one malformed key fails the whole list.
 pub(crate) fn validate_pubkeys(keys: &[String]) -> Result<()> {
-    keys.iter().try_for_each(|key| parse_public_key(key).map(drop))
+    keys.iter()
+        .try_for_each(|key| parse_public_key(key).map(drop))
 }
 
 /// Accept either the raw base64 key (`RW…`) or the full two-line

@@ -116,10 +116,8 @@ fn build_archive(dist_dir: &Path, archive_path: &Path) -> Result<(), SignError> 
     }
     files.sort();
 
-    let gz = flate2::write::GzEncoder::new(
-        fs::File::create(archive_path)?,
-        flate2::Compression::best(),
-    );
+    let gz =
+        flate2::write::GzEncoder::new(fs::File::create(archive_path)?, flate2::Compression::best());
     let mut tar = tar::Builder::new(gz);
     for relative in &files {
         let mut header = tar::Header::new_gnu();
