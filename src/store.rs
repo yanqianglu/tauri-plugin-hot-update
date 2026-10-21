@@ -11,9 +11,9 @@
 //! Rules:
 //! - `state.json` is written atomically (temp file in the same dir + fsync +
 //!   rename), so a crash mid-write can never leave a half-written pointer.
-//! - A missing, truncated, or otherwise unparseable `state.json` loads as a
-//!   fresh [`State`] — never a panic. The app then serves embedded (the
-//!   fail-safe floor) and the machine rebuilds state from there.
+//! - Unscoped storage resets missing or corrupt state. Scoped storage instead
+//!   preserves corrupt initialized state and durably disables OTA; embedded
+//!   assets remain available without forgetting failed hashes or watermarks.
 //! - Everything under `bundles/` that is not a referenced `seq-<N>` dir is
 //!   plugin-owned garbage (orphans from a kill between extraction and state
 //!   write, stale temp dirs) and is swept by boot GC.
@@ -38,6 +38,7 @@ const SEQ_PREFIX: &str = "seq-";
 #[derive(Debug)]
 pub struct Store {
     root: PathBuf,
+    strict: bool,
     write_lock: Mutex<()>,
 }
 
@@ -46,7 +47,31 @@ impl Store {
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
+            strict: false,
             write_lock: Mutex::new(()),
+        }
+    }
+
+    pub(crate) fn scoped(root: PathBuf) -> Self {
+        Self {
+            strict: true,
+            ..Self::new(root)
+        }
+    }
+
+    fn disabled_state(&self) -> State {
+        if let Ok(mut marker) = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(self.root.join("disabled"))
+        {
+            let _ = io::Write::write_all(&mut marker, b"OTA state needs explicit repair\n");
+            let _ = marker.sync_all();
+            let _ = sync_directory(&self.root);
+        }
+        State {
+            ota_disabled: true,
+            ..State::default()
         }
     }
 
@@ -71,28 +96,59 @@ impl Store {
         self.bundles_dir().join(format!("{SEQ_PREFIX}{seq}"))
     }
 
-    /// Load `state.json`. Missing or corrupt files yield a fresh state —
-    /// recovery is "serve embedded and start over", never a panic.
+    /// Load state, refusing corrupt initialized storage in scoped mode and
+    /// resetting to a fresh state in unscoped mode.
     pub fn load_state(&self) -> State {
         let path = self.state_path();
+        if self.strict
+            && (self.root.join("disabled").exists()
+                || (!path.exists()
+                    && (self.root.join("initialized").exists() || !self.present_seqs().is_empty())))
+        {
+            return self.disabled_state();
+        }
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return State::default(),
             Err(e) => {
                 log::warn!(
-                    "hot-update: failed to read {}: {e}; starting fresh",
-                    path.display()
+                    "hot-update: failed to read {}: {e}; {}",
+                    path.display(),
+                    if self.strict {
+                        "disabling OTA and preserving state"
+                    } else {
+                        "starting fresh"
+                    }
                 );
-                return State::default();
+                return if self.strict {
+                    self.disabled_state()
+                } else {
+                    State::default()
+                };
             }
         };
         match serde_json::from_slice(&bytes) {
-            Ok(state) => state,
+            Ok(state) => {
+                if self.strict && !self.root.join("initialized").exists() {
+                    self.disabled_state()
+                } else {
+                    state
+                }
+            }
             Err(e) => {
                 log::warn!(
-                    "hot-update: corrupt state.json ({e}); discarding it and starting fresh"
+                    "hot-update: corrupt state.json ({e}); {}",
+                    if self.strict {
+                        "disabling OTA and preserving state"
+                    } else {
+                        "starting fresh"
+                    }
                 );
-                State::default()
+                if self.strict {
+                    self.disabled_state()
+                } else {
+                    State::default()
+                }
             }
         }
     }
@@ -101,15 +157,24 @@ impl Store {
     /// directory, fsync, then rename over `state.json`.
     pub fn save_state(&self, state: &State) -> io::Result<()> {
         fs::create_dir_all(&self.root)?;
-        let path = self.state_path();
-        let tmp = self.root.join(format!("{STATE_FILE}.tmp"));
-        let json = serde_json::to_vec_pretty(state).map_err(io::Error::other)?;
-        {
-            let mut file = fs::File::create(&tmp)?;
-            io::Write::write_all(&mut file, &json)?;
-            file.sync_all()?;
+        if self.strict && self.load_state().ota_disabled {
+            return Err(io::Error::other("OTA store disabled after corruption"));
         }
-        fs::rename(&tmp, &path)
+        if self.strict && !self.root.join("initialized").exists() {
+            let marker = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(self.root.join("initialized"))?;
+            marker.sync_all()?;
+            sync_directory(&self.root)?;
+        }
+        let path = self.state_path();
+        let mut tmp = tempfile::NamedTempFile::new_in(&self.root)?;
+        let json = serde_json::to_vec_pretty(state).map_err(io::Error::other)?;
+        io::Write::write_all(&mut tmp, &json)?;
+        tmp.as_file().sync_all()?;
+        tmp.persist(&path).map_err(|error| error.error)?;
+        sync_directory(&self.root)
     }
 
     /// Serialized load → transition → persist. The transition runs on the
@@ -199,6 +264,14 @@ impl Store {
             ),
         }
     }
+}
+
+pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    fs::File::open(path)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn parse_seq(name: &str) -> Option<u64> {

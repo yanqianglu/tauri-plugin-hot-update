@@ -50,6 +50,7 @@ impl Fixture {
 
     pub fn config(&self) -> UpdateConfig {
         UpdateConfig {
+            contract: None,
             manifest_url: self.server.url("/manifest.json"),
             pubkeys: vec![self.keypair.pk.to_base64()],
         }
@@ -75,6 +76,7 @@ impl Fixture {
                 version: Version::parse(version).unwrap(),
                 min_shell_version: Version::parse(min_shell).unwrap(),
                 base_version: base.map(|b| Version::parse(b).unwrap()),
+                contract: None,
                 base_url: &self.server.url(""),
                 out_dir: &out,
             },

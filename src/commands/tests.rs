@@ -112,6 +112,7 @@ fn stage_bundle(root: &Path, seq: u64, version: &str, sha: &str) {
                     version: ver(version),
                     archive_sha256: sha.to_string(),
                     base_version: None,
+                    contract: None,
                 },
             )
         })
@@ -133,6 +134,7 @@ fn update_outcome_wire_shapes_are_pinned() {
         created_at: "2026-07-10T00:00:00Z".into(),
         min_shell_version: ver("1.0.0"),
         base_version: None,
+        contract: None,
         archive: ArchiveInfo {
             url: "https://cdn.example.com/bundle.tar.gz".into(),
             sha256: "aa".repeat(32),

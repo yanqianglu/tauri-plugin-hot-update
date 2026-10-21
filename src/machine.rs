@@ -51,6 +51,8 @@ pub struct BundleMeta {
     /// (no field in the manifest, or a pre-gate `state.json`) skips the check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_version: Option<BaseVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<crate::manifest::ReleaseContract>,
 }
 
 /// Why a staged bundle was not armed because of its `baseVersion`. Not a
@@ -115,6 +117,10 @@ fn base_refusal(seq: u64, meta: &BundleMeta, shell: &Version) -> Option<BaseRefu
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct State {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<crate::manifest::ReleaseContract>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ota_disabled: bool,
     /// The last bundle that completed a trial boot and was acked.
     pub committed: Option<u64>,
     /// Last-known-good bundle. Moves together with `committed` in v1; kept
@@ -195,6 +201,7 @@ pub fn resolve_boot(
     embedded_version: &Version,
     present: &BTreeSet<u64>,
 ) -> BootOutcome {
+    let scoped = state.contract.is_some();
     // 1. Unacked trial boot from a previous launch. The bundle pointed at by
     //    `booting` was armed last launch and never acked. Two-strike softening
     //    (design §4, "desktop-hardened rollback"): desktop launches are rare
@@ -205,7 +212,7 @@ pub fn resolve_boot(
         let meta = state.versions.get(&seq).cloned();
         let superseded = meta
             .as_ref()
-            .is_some_and(|m| m.version <= *embedded_version);
+            .is_some_and(|m| !scoped && m.version <= *embedded_version);
 
         if superseded {
             // A newer embedded frontend (e.g. a Sparkle/native update that
@@ -234,10 +241,12 @@ pub fn resolve_boot(
     }
 
     // 2. Fold the embedded version into the monotonic watermark.
-    state.max_version_seen = Some(match state.max_version_seen.take() {
-        Some(seen) => seen.max(embedded_version.clone()),
-        None => embedded_version.clone(),
-    });
+    if !scoped {
+        state.max_version_seen = Some(match state.max_version_seen.take() {
+            Some(seen) => seen.max(embedded_version.clone()),
+            None => embedded_version.clone(),
+        });
+    }
 
     // 3. Embedded-newer-than-OTA discard: a store update whose embedded
     //    frontend is at least as new as the committed OTA bundle wins, and a
@@ -247,7 +256,7 @@ pub fn resolve_boot(
             && state
                 .versions
                 .get(&seq)
-                .is_some_and(|meta| meta.version > *embedded_version)
+                .is_some_and(|meta| scoped || meta.version > *embedded_version)
     };
     if let Some(seq) = state.committed {
         if !ota_beats_embedded(seq, &state) {

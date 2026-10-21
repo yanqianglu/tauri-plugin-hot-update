@@ -43,6 +43,8 @@ struct Current {
 /// Everything fixed for the lifetime of the process, plus the swappable
 /// [`Current`] source.
 pub(crate) struct Activation {
+    pub(crate) contract: Option<crate::ReleaseContract>,
+    _process_lock: Option<std::fs::File>,
     store: Store,
     current: RwLock<Current>,
     embedded_version: Version,
@@ -94,9 +96,80 @@ impl Shared {
 /// Run boot resolution against `root` (the `hot-update/` dir) and activate
 /// serving. Called from the plugin setup hook; must never panic or fail the
 /// app — every failure path degrades to serving embedded assets.
+#[cfg(test)]
 pub(crate) fn initialize(shared: &Shared, root: PathBuf, embedded_version: Version) {
-    let store = Store::new(root);
-    let state = store.load_state();
+    initialize_scoped(shared, root, embedded_version, None);
+}
+
+pub(crate) fn initialize_scoped(
+    shared: &Shared,
+    root: PathBuf,
+    embedded_version: Version,
+    contract: Option<crate::ReleaseContract>,
+) {
+    let process_lock = if contract.is_some() {
+        let acquire = || -> std::io::Result<std::fs::File> {
+            std::fs::create_dir_all(&root)?;
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(root.join("process.lock"))?;
+            // Tauri starts the replacement before the old process exits.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            loop {
+                match file.try_lock() {
+                    Ok(()) => break,
+                    Err(std::fs::TryLockError::WouldBlock)
+                        if std::time::Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(error) => return Err(std::io::Error::other(error)),
+                }
+            }
+            Ok(file)
+        };
+        match acquire() {
+            Ok(lock) => Some(lock),
+            Err(error) => {
+                log::error!("hot-update: store cannot be locked: {error}; using embedded assets");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let store = if contract.is_some() {
+        Store::scoped(root)
+    } else {
+        Store::new(root)
+    };
+    let mut state = store.load_state();
+    let blocked = state.ota_disabled;
+    if let Some(expected) = &contract {
+        state.contract = Some(expected.clone());
+        let incompatible: std::collections::BTreeSet<u64> = state
+            .versions
+            .iter()
+            .filter(|(_, meta)| {
+                meta.contract.as_ref() != Some(expected)
+                    || meta.base_version.as_ref()
+                        != Some(&crate::BaseVersion::Valid(embedded_version.clone()))
+            })
+            .map(|(seq, _)| *seq)
+            .collect();
+        for pointer in [
+            &mut state.booting,
+            &mut state.committed,
+            &mut state.last_good,
+            &mut state.staged,
+        ] {
+            if pointer.is_some_and(|seq| incompatible.contains(&seq)) {
+                *pointer = None;
+            }
+        }
+    }
     let present = store.present_seqs();
     let outcome = machine::resolve_boot(state, &embedded_version, &present);
 
@@ -115,20 +188,24 @@ pub(crate) fn initialize(shared: &Shared, root: PathBuf, embedded_version: Versi
     // persisted state already supports: the committed bundle survived boot
     // validation and its pointer is already durable, but a *newly armed*
     // bundle must not run without its rollback marker on disk.
-    let active = match store.save_state(&outcome.state) {
-        Ok(()) => {
-            store.apply_effects(&outcome.effects);
-            store.sweep_foreign_entries();
-            outcome.active
-        }
-        Err(e) => {
-            log::error!(
-                "hot-update: failed to persist state.json ({e}); \
+    let active = if blocked {
+        Active::Embedded
+    } else {
+        match store.save_state(&outcome.state) {
+            Ok(()) => {
+                store.apply_effects(&outcome.effects);
+                store.sweep_foreign_entries();
+                outcome.active
+            }
+            Err(e) => {
+                log::error!(
+                    "hot-update: failed to persist state.json ({e}); \
                  serving committed/embedded without arming the staged bundle"
-            );
-            match outcome.state.committed {
-                Some(seq) => Active::Ota(seq),
-                None => Active::Embedded,
+                );
+                match outcome.state.committed {
+                    Some(seq) => Active::Ota(seq),
+                    None => Active::Embedded,
+                }
             }
         }
     };
@@ -158,6 +235,8 @@ pub(crate) fn initialize(shared: &Shared, root: PathBuf, embedded_version: Versi
     }
 
     let activation = Activation {
+        contract,
+        _process_lock: process_lock,
         store,
         current: RwLock::new(Current {
             active,
@@ -218,6 +297,17 @@ pub struct HotUpdate {
 }
 
 impl HotUpdate {
+    pub fn staged_version(&self) -> Result<Option<Version>> {
+        let activation = self.shared.activation()?;
+        let state = activation.store.load_state();
+        Ok(state
+            .staged
+            .and_then(|seq| state.versions.get(&seq).map(|meta| meta.version.clone())))
+    }
+
+    pub fn state_disabled(&self) -> Result<bool> {
+        Ok(self.shared.activation()?.store.load_state().ota_disabled)
+    }
     /// Commit the bundle this process booted (`notifyAppReady`).
     ///
     /// Commits the in-memory booted seq captured at boot resolution — never
@@ -273,6 +363,9 @@ impl HotUpdate {
     /// unproven bundles must never stack.
     pub fn apply_staged(&self) -> Result<ApplyOutcome> {
         let activation = self.shared.activation()?;
+        if activation.contract.is_some() {
+            return Ok(ApplyOutcome::NotApplicable);
+        }
         let present = activation.store.present_seqs();
         let (decision, effects) = activation.store.update(|state| {
             let (state, decision, effects) =
@@ -317,6 +410,11 @@ impl HotUpdate {
     /// webview is not torn; serving reverts to embedded on the next launch.
     pub fn reset(&self) -> Result<()> {
         let activation = self.shared.activation()?;
+        if activation.contract.is_some() {
+            return Err(Error::Config(
+                "scoped OTA state requires offline repair".into(),
+            ));
+        }
         let active = activation.current().active;
         let effects = activation
             .store

@@ -25,6 +25,8 @@ use crate::{Error, Result};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
+    pub contract: Option<crate::manifest::ReleaseContract>,
     /// URL of `manifest.json`. The detached signature is fetched from
     /// `{manifestUrl}.minisig`, so this must be a plain file URL with no
     /// query string. Required when `enabled` is true.
@@ -55,9 +57,12 @@ impl Config {
     ///
     /// A disabled config is not validated at all — dark-shipping with
     /// placeholder values must never brick the app.
-    pub(crate) fn validate(&self) -> Result<Option<UpdateConfig>> {
+    pub fn validate(&self) -> Result<Option<UpdateConfig>> {
         if !self.enabled {
             return Ok(None);
+        }
+        if let Some(contract) = &self.contract {
+            contract.validate()?;
         }
         let url = self
             .manifest_url
@@ -81,6 +86,17 @@ impl Config {
                     .into(),
             ));
         }
+        if self.contract.is_some() {
+            let parsed =
+                reqwest::Url::parse(url).map_err(|error| Error::Config(error.to_string()))?;
+            if parsed.scheme() != "https"
+                && !matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+            {
+                return Err(Error::Config(
+                    "OTA requires HTTPS outside loopback verification".into(),
+                ));
+            }
+        }
         if self.pubkeys.is_empty() {
             return Err(Error::Config(
                 "at least one trusted minisign public key is required in `pubkeys`".into(),
@@ -90,6 +106,7 @@ impl Config {
         Ok(Some(UpdateConfig {
             manifest_url: url.to_string(),
             pubkeys: self.pubkeys.clone(),
+            contract: self.contract.clone(),
         }))
     }
 }

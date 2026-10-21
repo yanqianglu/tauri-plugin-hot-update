@@ -39,6 +39,7 @@ fn stage_bundle(root: &Path, seq: u64, version: &str, sha: &str) {
                     version: ver(version),
                     archive_sha256: sha.to_string(),
                     base_version: None,
+                    contract: None,
                 },
             )
         })
@@ -508,6 +509,7 @@ fn apply_staged_discards_a_bundle_the_embedded_frontend_has_caught_up_to() {
                     version: ver("1.2.0"),
                     archive_sha256: "aa".into(),
                     base_version: None,
+                    contract: None,
                 },
             );
             (state, ())
@@ -538,6 +540,7 @@ fn stage_bundle_with_base(root: &Path, version: &str, base: &str) -> std::path::
                     version: ver(version),
                     archive_sha256: "aa".into(),
                     base_version: Some(crate::manifest::BaseVersion::parse(base)),
+                    contract: None,
                 },
             )
         })

@@ -81,7 +81,7 @@ pub use config::Config;
 pub use error::{Error, Result};
 pub use extract::ExtractError;
 pub use machine::{AckOutcome, StageError};
-pub use manifest::{ArchiveInfo, BaseVersion, Manifest};
+pub use manifest::{verify_and_parse, ArchiveInfo, BaseVersion, Manifest, ReleaseContract};
 pub use runtime::{ApplyOutcome, BundleSource, CurrentBundle, HotUpdate};
 pub use update::{UpdateConfig, UpdateOutcome};
 
@@ -121,7 +121,22 @@ pub fn install<R: Runtime>(context: &mut tauri::Context<R>) -> HotUpdateHandle {
 /// *Runtime* failures (unresolvable data dir, unwritable state) degrade to
 /// serving embedded assets; they never abort the app.
 pub fn init<R: Runtime>(handle: HotUpdateHandle) -> TauriPlugin<R, Option<Config>> {
-    init_with_root(handle, None)
+    init_with_root(handle, None, None)
+}
+
+pub fn init_with_config<R: Runtime>(
+    handle: HotUpdateHandle,
+    config: Config,
+) -> TauriPlugin<R, Option<Config>> {
+    init_with_root(handle, None, Some(config))
+}
+
+pub fn init_with_config_and_root<R: Runtime>(
+    handle: HotUpdateHandle,
+    config: Config,
+    root: Option<std::path::PathBuf>,
+) -> TauriPlugin<R, Option<Config>> {
+    init_with_root(handle, root, Some(config))
 }
 
 /// Test-only variant pinning the store root to a temp dir instead of the
@@ -132,12 +147,13 @@ pub(crate) fn init_for_test<R: Runtime>(
     handle: HotUpdateHandle,
     root: std::path::PathBuf,
 ) -> TauriPlugin<R, Option<Config>> {
-    init_with_root(handle, Some(root))
+    init_with_root(handle, Some(root), None)
 }
 
 fn init_with_root<R: Runtime>(
     handle: HotUpdateHandle,
     root_override: Option<std::path::PathBuf>,
+    config_override: Option<Config>,
 ) -> TauriPlugin<R, Option<Config>> {
     PluginBuilder::<R, Option<Config>>::new("hot-update")
         .invoke_handler(tauri::generate_handler![
@@ -149,13 +165,16 @@ fn init_with_root<R: Runtime>(
             commands::apply,
         ])
         .setup(move |app, api| {
-            let config = api.config().as_ref().ok_or_else(|| {
-                Error::Config(
-                    "missing `plugins.hot-update` in tauri.conf.json; \
+            let config = config_override
+                .as_ref()
+                .or(api.config().as_ref())
+                .ok_or_else(|| {
+                    Error::Config(
+                        "missing `plugins.hot-update` in tauri.conf.json; \
                      set { \"enabled\": false } to ship the plugin dark"
-                        .into(),
-                )
-            })?;
+                            .into(),
+                    )
+                })?;
             let update = config.validate()?;
             if update.is_some() {
                 let root = match &root_override {
@@ -173,7 +192,19 @@ fn init_with_root<R: Runtime>(
                 };
                 if let Some(root) = root {
                     let embedded_version = app.package_info().version.clone();
-                    runtime::initialize(&handle.shared, root, embedded_version);
+                    let root = if let Some(contract) = &config.contract {
+                        use sha2::{Digest, Sha256};
+                        let identity = serde_json::to_vec(&(contract, &embedded_version))?;
+                        root.join(download::to_hex(&Sha256::digest(identity)))
+                    } else {
+                        root
+                    };
+                    runtime::initialize_scoped(
+                        &handle.shared,
+                        root,
+                        embedded_version,
+                        config.contract.clone(),
+                    );
                 }
             } else {
                 log::info!("hot-update: disabled by config; serving embedded assets");
@@ -200,3 +231,6 @@ impl<R: Runtime, T: Manager<R>> HotUpdateExt<R> for T {
         self.state::<HotUpdate>().inner()
     }
 }
+
+#[cfg(test)]
+mod scoped_tests;

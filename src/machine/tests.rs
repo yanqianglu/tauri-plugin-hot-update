@@ -14,6 +14,7 @@ fn meta(version: &str, sha: &str) -> BundleMeta {
         version: v(version),
         archive_sha256: sha.to_string(),
         base_version: None,
+        contract: None,
     }
 }
 
@@ -744,6 +745,7 @@ fn ack_after_a_mid_session_reset_is_refused() {
 fn meta_with_base(version: &str, sha: &str, base: &str) -> BundleMeta {
     BundleMeta {
         base_version: Some(BaseVersion::parse(base)),
+        contract: None,
         ..meta(version, sha)
     }
 }

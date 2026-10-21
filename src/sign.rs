@@ -7,8 +7,7 @@
 //! The archive build is deterministic (sorted entries, zeroed mtimes/owners,
 //! fixed modes): re-signing an identical dist yields an identical archive
 //! and therefore an identical sha256. Only files are archived — extraction
-//! recreates parent directories — and symlinks in the dist are followed on
-//! the publisher's machine, landing as plain file content.
+//! recreates parent directories. Links and special files are refused.
 
 use std::fs;
 use std::io;
@@ -31,6 +30,7 @@ pub struct SignOptions<'a> {
     pub min_shell_version: Version,
     /// Native app version the bundle was built from; `None` omits the field.
     pub base_version: Option<Version>,
+    pub contract: Option<crate::manifest::ReleaseContract>,
     /// Public base URL the archive will be served from; the manifest's
     /// `archive.url` becomes `{base_url}/{archive file name}`.
     pub base_url: &'a str,
@@ -80,6 +80,7 @@ pub fn sign_release(
         created_at: created_at_now(),
         min_shell_version: options.min_shell_version.clone(),
         base_version: options.base_version.clone().map(Into::into),
+        contract: options.contract.clone(),
         archive: ArchiveInfo {
             url: format!("{}/{archive_name}", options.base_url.trim_end_matches('/')),
             sha256: to_hex(&Sha256::digest(&archive_bytes)),
@@ -135,18 +136,24 @@ fn build_archive(dist_dir: &Path, archive_path: &Path) -> Result<(), SignError> 
     Ok(())
 }
 
-/// Relative paths of all files under `dir`, recursively; symlinks followed.
+/// Relative paths of regular files under `dir`; links and special files are refused.
 fn collect_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.is_dir() {
+        let kind = fs::symlink_metadata(&path)?.file_type();
+        if kind.is_dir() {
             collect_files(root, &path, out)?;
-        } else {
+        } else if kind.is_file() {
             let relative = path
                 .strip_prefix(root)
                 .map_err(io::Error::other)?
                 .to_path_buf();
             out.push(relative);
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "frontend bundles may contain only regular files and directories",
+            ));
         }
     }
     Ok(())

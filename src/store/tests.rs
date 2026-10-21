@@ -34,6 +34,7 @@ fn populated_state() -> State {
                 version: Version::parse(version).unwrap(),
                 archive_sha256: sha.to_string(),
                 base_version: None,
+                contract: None,
             },
         );
     }
@@ -179,6 +180,7 @@ fn update_persists_the_transition_result() {
         version: Version::parse("1.1.0").unwrap(),
         archive_sha256: "sha-1".to_string(),
         base_version: None,
+        contract: None,
     };
     let result = store.update(|state| stage(state, 1, meta.clone())).unwrap();
     assert!(result.is_ok());

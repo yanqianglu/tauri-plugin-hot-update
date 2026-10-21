@@ -264,6 +264,7 @@ async fn manifest_signed_by_an_untrusted_key_is_rejected() {
     let hot_update = boot(&fx.root, "1.0.0");
     let attacker = KeyPair::generate_unencrypted_keypair().unwrap();
     let config = UpdateConfig {
+        contract: None,
         pubkeys: vec![attacker.pk.to_base64()],
         ..fx.config()
     };
@@ -281,6 +282,7 @@ async fn rotated_second_trusted_key_verifies_over_the_wire() {
     let hot_update = boot(&fx.root, "1.0.0");
     let old_key = KeyPair::generate_unencrypted_keypair().unwrap();
     let config = UpdateConfig {
+        contract: None,
         pubkeys: vec![old_key.pk.to_base64(), fx.keypair.pk.to_base64()],
         ..fx.config()
     };
@@ -410,6 +412,7 @@ async fn update_api_errors_cleanly_before_initialization() {
         shared: Arc::new(Shared::default()),
     };
     let fx_config = UpdateConfig {
+        contract: None,
         manifest_url: "http://127.0.0.1:1/manifest.json".into(),
         pubkeys: vec![],
     };

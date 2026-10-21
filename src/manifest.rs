@@ -47,6 +47,8 @@ pub struct Manifest {
     /// shells that would otherwise just skip it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_version: Option<BaseVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<ReleaseContract>,
     pub archive: ArchiveInfo,
 }
 
@@ -98,6 +100,32 @@ impl<'de> Deserialize<'de> for BaseVersion {
             serde_json::Value::String(raw) => Self::parse(&raw),
             other => Self::Invalid(other.to_string()),
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReleaseContract {
+    pub application_id: String,
+    pub channel: String,
+    pub state_format: String,
+    pub native_revision: String,
+}
+
+impl ReleaseContract {
+    pub fn validate(&self) -> Result<()> {
+        if self.application_id.is_empty()
+            || self.channel.is_empty()
+            || self.state_format.is_empty()
+            || self.native_revision.len() != 40
+            || !self
+                .native_revision
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(Error::Config("OTA contract needs application, channel, state format and a 40-digit native revision".into()));
+        }
+        Ok(())
     }
 }
 

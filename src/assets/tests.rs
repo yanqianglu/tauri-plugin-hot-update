@@ -76,6 +76,7 @@ fn activate_bundle(root: &Path, files: &[(&str, &str)]) -> Arc<Shared> {
                     version: Version::parse("1.1.0").unwrap(),
                     archive_sha256: "sha-1".to_string(),
                     base_version: None,
+                    contract: None,
                 },
             )
         })
@@ -114,7 +115,7 @@ fn unactivated_provider_serves_embedded_only() {
 }
 
 #[test]
-fn active_bundle_wins_over_embedded_per_file() {
+fn active_bundle_never_mixes_with_embedded_files() {
     let tmp = TempDir::new().unwrap();
     let shared = activate_bundle(
         tmp.path(),
@@ -134,11 +135,8 @@ fn active_bundle_wins_over_embedded_per_file() {
         get_str(&assets, "/assets/app.js").as_deref(),
         Some("OTA JS")
     );
-    // Missing in the bundle → per-file fallback to embedded.
-    assert_eq!(
-        get_str(&assets, "/only-embedded.css").as_deref(),
-        Some("EMBEDDED CSS")
-    );
+    // A missing OTA file must not load incompatible embedded code.
+    assert_eq!(get_str(&assets, "/only-embedded.css").as_deref(), None);
     // Missing everywhere → None.
     assert_eq!(get_str(&assets, "/nowhere.txt"), None);
 }

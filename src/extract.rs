@@ -89,6 +89,7 @@ fn extract_with_limits(archive: &Path, target: &Path, limits: Limits) -> Result<
     let stream_cap = limits.max_total_bytes.saturating_add(STREAM_SLACK_BYTES);
     let exceeded = Rc::new(Cell::new(false));
     let reader = CappedReader {
+        started: std::time::Instant::now(),
         inner: GzDecoder::new(fs::File::open(archive)?),
         remaining: stream_cap,
         exceeded: Rc::clone(&exceeded),
@@ -97,6 +98,7 @@ fn extract_with_limits(archive: &Path, target: &Path, limits: Limits) -> Result<
 
     let mut entry_count: usize = 0;
     let mut total_bytes: u64 = 0;
+    let mut seen = std::collections::BTreeSet::new();
     let mut entries = tar.entries()?;
     loop {
         let entry = match entries.next() {
@@ -126,6 +128,11 @@ fn extract_with_limits(archive: &Path, target: &Path, limits: Limits) -> Result<
         };
 
         let dest = safe_join(target, &raw_path)?;
+        if !seen.insert(dest.clone()) {
+            return Err(
+                io::Error::new(io::ErrorKind::AlreadyExists, "duplicate archive path").into(),
+            );
+        }
         match kind {
             EntryKind::Dir => fs::create_dir_all(&dest)?,
             EntryKind::File => {
@@ -148,6 +155,20 @@ fn extract_with_limits(archive: &Path, target: &Path, limits: Limits) -> Result<
                 file.sync_all()?;
             }
         }
+    }
+    let mut directories = std::collections::BTreeSet::new();
+    for path in &seen {
+        let mut parent = path.parent();
+        while let Some(directory) = parent.filter(|directory| directory.starts_with(target)) {
+            directories.insert(directory.to_path_buf());
+            parent = directory.parent();
+        }
+        if path.is_dir() {
+            directories.insert(path.to_path_buf());
+        }
+    }
+    for directory in directories.iter().rev() {
+        crate::store::sync_directory(directory)?;
     }
     Ok(())
 }
@@ -217,6 +238,7 @@ fn safe_join(target: &Path, raw: &str) -> Result<PathBuf, ExtractError> {
 /// Hard cap on bytes read through the gzip decoder. Flips `exceeded` and
 /// errors once the cap is crossed, no matter what the tar crate is buffering.
 struct CappedReader<R: Read> {
+    started: std::time::Instant,
     inner: R,
     remaining: u64,
     exceeded: Rc<Cell<bool>>,
@@ -224,6 +246,12 @@ struct CappedReader<R: Read> {
 
 impl<R: Read> Read for CappedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.started.elapsed() > std::time::Duration::from_secs(30) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "archive extraction deadline exceeded",
+            ));
+        }
         if self.remaining == 0 {
             self.exceeded.set(true);
             return Err(io::Error::other("decompressed stream exceeds the size cap"));

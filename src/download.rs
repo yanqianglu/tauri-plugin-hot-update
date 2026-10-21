@@ -31,7 +31,13 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub type OnProgress<'a> = &'a mut (dyn FnMut(u64, u64) + Send);
 
 pub(crate) fn http_client() -> Result<reqwest::Client> {
-    let builder = reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT);
+    http_client_with_timeout(Duration::from_secs(120))
+}
+
+fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client> {
+    let builder = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(timeout);
 
     // reqwest's rustls features hard-depend on `rustls-platform-verifier`, and
     // with no explicit root store a client uses it. Its Android backend needs a
@@ -135,4 +141,29 @@ pub(crate) fn to_hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{b:02x}");
     }
     out
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    #[tokio::test]
+    async fn stalled_body_hits_the_total_request_deadline() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.read(&mut [0; 2048]);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nx")
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(150));
+        });
+        let client = http_client_with_timeout(Duration::from_millis(50)).unwrap();
+        let error = fetch_capped(&client, &format!("http://{address}/manifest.json"), 100)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Http(error) if error.is_timeout()));
+        server.join().unwrap();
+    }
 }

@@ -313,3 +313,27 @@ fn truncated_archive_is_an_io_error_not_a_panic() {
     let result = extract_tar_gz(&archive, &target);
     assert!(matches!(result, Err(ExtractError::Io(_))), "{result:?}");
 }
+
+#[test]
+fn duplicate_archive_paths_are_refused() {
+    let archive = honest_archive(&[("index.html", b"first"), ("index.html", b"second")]);
+    let (_tmp, archive, target) = setup(&archive);
+    assert!(
+        matches!(extract_tar_gz(&archive, &target), Err(ExtractError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists)
+    );
+}
+
+#[test]
+fn expired_extraction_stops_before_reading_more_bytes() {
+    let mut reader = CappedReader {
+        started: std::time::Instant::now() - std::time::Duration::from_secs(31),
+        inner: io::Cursor::new(b"payload"),
+        remaining: 100,
+        exceeded: Rc::new(Cell::new(false)),
+    };
+    assert_eq!(
+        reader.read(&mut [0; 10]).unwrap_err().kind(),
+        io::ErrorKind::TimedOut
+    );
+    assert_eq!(reader.inner.position(), 0);
+}

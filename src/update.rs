@@ -39,6 +39,7 @@ use crate::{Error, Result};
 /// callers may construct it directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateConfig {
+    pub contract: Option<crate::manifest::ReleaseContract>,
     /// URL of `manifest.json`. The detached signature is fetched from
     /// `{manifest_url}.minisig`, so the URL must be a plain file URL
     /// (no query strings).
@@ -96,10 +97,16 @@ impl HotUpdate {
     /// failures; gate refusals are `Ok` outcomes.
     pub async fn check(&self, config: &UpdateConfig) -> Result<UpdateOutcome> {
         let activation = self.shared.activation()?;
+        if config.contract != activation.contract {
+            return Err(Error::Config(
+                "update identity differs from native configuration".into(),
+            ));
+        }
         let _serialized = activation.update_lock().lock().await;
         let client = http_client()?;
         let manifest = fetch_verified_manifest(&client, config).await?;
         let state = activation.store().load_state();
+        validate_contract(&manifest, config, activation.embedded_version(), &state)?;
         Ok(
             match gate(&manifest, &state, activation.embedded_version()) {
                 Some(refusal) => refusal,
@@ -120,10 +127,21 @@ impl HotUpdate {
         mut on_progress: impl FnMut(u64, u64) + Send,
     ) -> Result<UpdateOutcome> {
         let activation = self.shared.activation()?;
+        if config.contract != activation.contract {
+            return Err(Error::Config(
+                "update identity differs from native configuration".into(),
+            ));
+        }
         let _serialized = activation.update_lock().lock().await;
         let client = http_client()?;
         let manifest = fetch_verified_manifest(&client, config).await?;
         let store = activation.store();
+        validate_contract(
+            &manifest,
+            config,
+            activation.embedded_version(),
+            &store.load_state(),
+        )?;
         if let Some(refusal) = gate(
             &manifest,
             &store.load_state(),
@@ -158,6 +176,11 @@ impl HotUpdate {
         tokio::task::spawn_blocking(move || crate::extract::extract_tar_gz(&archive_path, &target))
             .await
             .map_err(|e| Error::Io(std::io::Error::other(e)))??;
+        if config.contract.is_some() && !extract_dir.path().join("index.html").is_file() {
+            return Err(Error::ManifestInvalid(
+                "frontend archive needs index.html".into(),
+            ));
+        }
         drop(archive_file);
 
         // Promote: allocate a never-used seq, atomically rename the fully
@@ -166,10 +189,12 @@ impl HotUpdate {
         let seq = store.allocate_seq(&store.load_state());
         let final_dir = store.bundle_dir(seq);
         fs::rename(extract_dir.keep(), &final_dir)?;
+        crate::store::sync_directory(&bundles_dir)?;
         let meta = BundleMeta {
             version: manifest.version.clone(),
             archive_sha256: manifest.archive.sha256.clone(),
             base_version: manifest.base_version.clone(),
+            contract: manifest.contract.clone(),
         };
         match store.update(|state| machine::stage(state, seq, meta))? {
             Ok(effects) => {
@@ -259,6 +284,30 @@ fn gate(manifest: &Manifest, state: &State, shell: &Version) -> Option<UpdateOut
         }
     }
     None
+}
+
+fn validate_contract(
+    manifest: &Manifest,
+    config: &UpdateConfig,
+    native: &Version,
+    state: &State,
+) -> Result<()> {
+    if state.ota_disabled {
+        return Err(Error::ManifestInvalid(
+            "OTA state is disabled; use the native updater or repair the local OTA store".into(),
+        ));
+    }
+    if let Some(expected) = &config.contract {
+        if manifest.contract.as_ref() != Some(expected)
+            || manifest.base_version.as_ref() != Some(&BaseVersion::Valid(native.clone()))
+            || manifest.min_shell_version != *native
+        {
+            return Err(Error::ManifestInvalid(
+                "release contract or exact native base does not match this executable".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

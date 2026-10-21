@@ -1,4 +1,4 @@
-//! The `Assets` provider: active-OTA-bundle-dir first, embedded fallback.
+//! The `Assets` provider serves one complete frontend source at a time.
 //!
 //! This is the single call site behind the `tauri://` scheme handler on every
 //! platform, so the origin never changes and web storage (auth/session state)
@@ -59,19 +59,11 @@ impl<R: Runtime> Assets<R> for HotUpdateAssets<R> {
     }
 
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
-        if let Some(path) = self.ota_file(key) {
-            match std::fs::read(&path) {
-                Ok(bytes) => {
-                    log::debug!("hot-update: {} served from OTA bundle", key.as_ref());
-                    return Some(Cow::Owned(bytes));
-                }
-                Err(e) => {
-                    log::warn!(
-                        "hot-update: reading {} failed ({e}); falling back to embedded",
-                        path.display()
-                    );
-                }
-            }
+        if self.shared.active_dir().is_some() {
+            return self
+                .ota_file(key)
+                .and_then(|path| std::fs::read(path).ok())
+                .map(Cow::Owned);
         }
         self.embedded.get(key)
     }

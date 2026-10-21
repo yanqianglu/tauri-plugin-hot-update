@@ -16,6 +16,7 @@
 - [Why](#why)
 - [What it does & the safety model](#what-it-does--the-safety-model)
 - [How it works](#how-it-works)
+- [Scoped cold-launch updates](#scoped-cold-launch-updates)
 - [Install](#install)
 - [Integration quickstart](#integration-quickstart)
 - [Publishing a bundle](#publishing-a-bundle)
@@ -43,11 +44,67 @@ Every frontend change in a Tauri mobile app — even a one-line CSS fix — norm
 
 ## How it works
 
-Tauri serves your frontend through a single extension point: `tauri::Context::assets`, a public `Box<dyn Assets<R>>` whose `get()` method is the one call site behind the `tauri://` scheme handler on **every** platform. This plugin **swaps that provider** for one that resolves each asset from the active on-disk OTA bundle directory, falling back to the embedded assets compiled from `frontendDist`.
+Tauri serves your frontend through a single extension point: `tauri::Context::assets`, a public `Box<dyn Assets<R>>` whose `get()` method is the one call site behind the `tauri://` scheme handler on **every** platform. This plugin **swaps that provider** for one that serves either the complete active OTA bundle or the embedded assets compiled from `frontendDist`. Missing files in an active OTA bundle do not fall back to embedded files from a different frontend generation.
 
 Because it reuses the **existing `tauri://` scheme** rather than registering a new one, the webview origin never changes — `tauri://localhost` on iOS/macOS, `http://tauri.localhost` on Android. Your `localStorage`, `IndexedDB`, cookies, and auth/session state are **preserved by construction**: an OTA update does not log your users out. (Registering a second scheme *would* change the origin and silently wipe web storage — this plugin avoids that landmine entirely.)
 
 The provider is armed inside the plugin's setup hook, which Tauri runs **before any window or webview is created** — so the `staged → booting` promotion is durably persisted before the new bundle serves anything, on every platform including Android (where the app data dir cannot even be resolved until the app exists).
+
+## Scoped cold-launch updates
+
+Applications that require exact native compatibility can opt into a signed
+`ReleaseContract` supplied by native code. The contract contains `applicationId`,
+`channel`, `stateFormat`, and a 40-character hexadecimal `nativeRevision`.
+Use a separate feed and signing key while migrating existing binaries. Older
+clients and current unscoped clients do not enforce this optional contract;
+adding the signed field does not make those clients identity-aware.
+
+Set `Config.contract` before registering the plugin with
+`init_with_config(handle, config)`. `init_with_config_and_root` also accepts an
+optional app-owned storage root, for example to isolate an integration test.
+Configuration with a contract requires HTTPS, except for loopback testing.
+
+The same contract must appear in the signed manifest. Scoped releases also
+require both `baseVersion` and `minShellVersion` to equal the installed native
+package version. Storage is namespaced by the contract and native version.
+Staged, trial, and confirmed bundles are checked against that identity on every
+launch. Frontend version ordering is independent of native version ordering.
+
+Scoped storage holds a process lock through shutdown. It refuses in-process
+`apply_staged` and `reset`; activation requires a cold launch. Existing unscoped
+configuration remains available. In scoped mode, missing or corrupt initialized
+state creates a durable `disabled` marker and preserves the original state file.
+The app serves embedded assets and must arrange offline repair before OTA can
+resume. Check `state_disabled()` when presenting update controls. Use
+`staged_version()` to distinguish a downloaded candidate from the running source.
+
+The app decides when local startup is healthy, then calls `notify_app_ready()`
+for the running source. A download that finishes during that launch remains
+staged. Two launches without confirmation restore the previous confirmed source
+or embedded assets and blacklist the failed archive hash.
+
+Sign a scoped release by adding all identity flags and the verification key:
+
+```bash
+hot-update-sign --dist dist --version 0.0.1 \
+  --min-shell 9.0.0 --base-version 9.0.0 \
+  --application-id com.example.app --channel stable \
+  --state-format persisted-v1 --native-revision <40-character-native-source-sha> \
+  --key frontend.key --public-key frontend.pub \
+  --base-url https://example.com/frontend/0.0.1 --out release
+```
+
+The signer accepts encrypted and unencrypted boxed minisign keys and verifies
+its output when `--public-key` is supplied. It rejects links and special files
+in the frontend directory. Acquisition uses a 120-second total request timeout.
+Extraction has a 30-second deadline, refuses duplicate paths, and retains the
+existing size and entry limits. State replacement uses a same-directory atomic
+persist operation. File and directory synchronization is implemented on Unix;
+power-loss durability and packaged behavior still need platform verification.
+
+The process-lock implementation requires Rust 1.89 or newer. Run the signed
+HTTP, compatibility, corruption, rollback, and subprocess-lock regressions with
+`cargo test --features cli`. Tests use disposable keys and loopback listeners.
 
 ## Install
 
