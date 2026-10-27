@@ -11,6 +11,7 @@
 //! served (a trial boot without a persisted marker could evade rollback).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use semver::Version;
@@ -26,6 +27,17 @@ use crate::{Error, Result};
 #[derive(Default)]
 pub(crate) struct Shared {
     activation: OnceLock<Activation>,
+    /// Set when the page called `notify_app_ready` in this process: the page
+    /// got far enough to start. Read by boot recovery ([`crate::recovery`]).
+    page_acked: AtomicBool,
+    /// Set by boot recovery right after it switched bundles, cleared when the
+    /// webview starts loading again. While set, an ack can only come from the
+    /// old page (the one that was running before the switch); it must not
+    /// commit the new bundle, which no page has run yet.
+    reload_pending: AtomicBool,
+    /// Held by `notify_app_ready` and by boot recovery's check-and-switch, so
+    /// "the page acked" and "switch bundles" can never interleave.
+    gate: std::sync::Mutex<()>,
 }
 
 /// What the provider serves right now. Set at boot resolution and replaced
@@ -80,6 +92,25 @@ impl Shared {
     /// `None` before activation: the fail-safe default is embedded.
     pub(crate) fn active_dir(&self) -> Option<PathBuf> {
         self.activation.get()?.current().active_dir
+    }
+
+    /// True once the page has called `notify_app_ready` in this process.
+    pub(crate) fn page_acked(&self) -> bool {
+        self.page_acked.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn gate(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.gate.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Boot recovery switched bundles; acks are ignored until the webview
+    /// starts its next page load.
+    pub(crate) fn set_reload_pending(&self, pending: bool) {
+        self.reload_pending.store(pending, Ordering::SeqCst);
+    }
+
+    pub(crate) fn reload_pending(&self) -> bool {
+        self.reload_pending.load(Ordering::SeqCst)
     }
 
     pub(crate) fn is_activated(&self) -> bool {
@@ -224,7 +255,20 @@ impl HotUpdate {
     /// a value re-read from disk — so a download that finished mid-session
     /// stays staged for its own trial boot. Idempotent.
     pub fn notify_app_ready(&self) -> Result<AckOutcome> {
+        let _gate = self.shared.gate();
         let activation = self.shared.activation()?;
+        if self.shared.reload_pending() {
+            // The page that is acking was loaded before boot recovery switched
+            // bundles and is about to be reloaded: it never ran the new one.
+            log::warn!("hot-update: ack from the pre-switch page ignored");
+            let seq = match activation.current().active {
+                Active::Ota(seq) => seq,
+                Active::Embedded => 0,
+            };
+            return Ok(AckOutcome::Stale(seq));
+        }
+        // Recorded even if the commit below fails: the page is running.
+        self.shared.page_acked.store(true, Ordering::SeqCst);
         let booted = activation.current().active;
         let (outcome, effects) = activation.store.update(|state| {
             let (state, outcome, effects) = machine::ack(state, booted);

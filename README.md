@@ -128,6 +128,7 @@ fn main() {
 - `manifestUrl` — a plain file URL (no query string); the detached signature is fetched from `<manifestUrl>.minisig`.
 - `pubkeys` — one or more trusted minisign public keys (raw `RW…` base64 or full `minisign.pub` contents). Ship the old **and** new key during a rotation.
 - `enabled` — set `false` to **dark-ship**: the plugin registers but stays inert, running purely on embedded assets.
+- `bootRecoverySecs` — optional. If the page has not called `notifyAppReady()` this many seconds after launch, the plugin checks for an update itself, switches to it and reloads the webview, so a crash at start can still be fixed by an update. Off when omitted or `0`; minimum 5.
 
 The config is the **only** update source — JS cannot pass a manifest URL or keys, so compromised webview content can never redirect updates. A malformed config aborts startup on the developer's machine, never silently in the field.
 

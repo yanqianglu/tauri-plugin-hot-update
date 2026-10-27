@@ -7,6 +7,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- **Boot recovery** (`plugins.hot-update.bootRecoverySecs`, off by default): if
+  the page has not called `notifyAppReady()` this many seconds after the plugin
+  starts, the plugin runs the check/download pipeline itself, switches to the
+  staged bundle and reloads the webview. A bundle that crashes before it can
+  look for its own fix (the one compiled into the app included) now gets the
+  fix without any page code. Switches at most once per process (a failed check
+  is retried a few times); the new bundle goes through the normal
+  `staged → booting → committed` rollback. A page that acks while the download
+  runs is not reloaded, and an ack from the pre-switch page never commits the
+  new bundle. Reloads only the app's own windows, with the native reload.
+  Off in debug builds. Values below 5 are raised to 5. Needs tauri 2.10+.
+
 - Manifest `baseVersion` (optional): the native app version a bundle was built
   from. A shell newer than the base refuses the bundle with the new
   `shellNewerThanBase` outcome, so an OTA never downgrades a newer native
