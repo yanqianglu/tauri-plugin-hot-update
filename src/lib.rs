@@ -64,6 +64,7 @@ mod error;
 mod extract;
 mod machine;
 mod manifest;
+mod recovery;
 mod runtime;
 /// Release-side signing (the `hot-update-sign` CLI's core). Public only with
 /// the `cli` feature; also compiled for tests so the suite round-trips the
@@ -178,9 +179,22 @@ fn init_with_root<R: Runtime>(
             } else {
                 log::info!("hot-update: disabled by config; serving embedded assets");
             }
+            let recovery_after = config.boot_recovery_after();
             app.manage(HotUpdate {
                 shared: Arc::clone(&handle.shared),
             });
+            if let (Some(after), Some(update)) = (recovery_after, update.clone()) {
+                if handle.shared.is_activated() {
+                    tauri::async_runtime::spawn(recovery::run(
+                        app.clone(),
+                        HotUpdate {
+                            shared: Arc::clone(&handle.shared),
+                        },
+                        update,
+                        after,
+                    ));
+                }
+            }
             app.manage(commands::CommandConfig { update });
             Ok(())
         })

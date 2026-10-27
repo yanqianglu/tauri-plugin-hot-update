@@ -41,13 +41,39 @@ pub struct Config {
     /// assets exactly as if the plugin were absent.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Boot recovery: if the page has not called `notifyAppReady()` this many
+    /// seconds after the plugin starts, the plugin checks for an update itself
+    /// (no page code involved), stages it, switches to it and reloads the
+    /// webview. This is the way out when the bundle the app is running
+    /// crashes before it can look for its own fix. Omit or set 0 to turn it
+    /// off. Values below 5 are raised to 5.
+    #[serde(default)]
+    pub boot_recovery_secs: Option<u64>,
 }
 
 fn default_true() -> bool {
     true
 }
 
+/// Shortest delay boot recovery accepts: a healthy cold start must be able to
+/// reach `notifyAppReady()` first.
+const MIN_BOOT_RECOVERY_SECS: u64 = 5;
+
 impl Config {
+    /// How long to wait for `notifyAppReady()` before recovering, or `None`
+    /// when disabled (plugin disabled, or no/zero `bootRecoverySecs`).
+    pub(crate) fn boot_recovery_after(&self) -> Option<std::time::Duration> {
+        if !self.enabled {
+            return None;
+        }
+        match self.boot_recovery_secs {
+            None | Some(0) => None,
+            Some(secs) => Some(std::time::Duration::from_secs(
+                secs.max(MIN_BOOT_RECOVERY_SECS),
+            )),
+        }
+    }
+
     /// Validate into the pipeline's [`UpdateConfig`], or `None` when
     /// disabled. Every failure here aborts app startup by design: the config
     /// ships inside the store binary, so a malformed trust anchor or URL is

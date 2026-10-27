@@ -130,3 +130,38 @@ fn unknown_config_fields_are_rejected_at_deserialization() {
     .unwrap_err();
     assert!(err.to_string().contains("pubKeys"), "{err}");
 }
+
+#[test]
+fn boot_recovery_is_off_unless_asked_for() {
+    let key = valid_pubkey();
+    let base = |extra: serde_json::Value| {
+        let mut value = json!({
+            "manifestUrl": "https://updates.example.com/manifest.json",
+            "pubkeys": [key],
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        parse(value).unwrap()
+    };
+    assert_eq!(base(json!({})).boot_recovery_after(), None);
+    assert_eq!(
+        base(json!({"bootRecoverySecs": 0})).boot_recovery_after(),
+        None
+    );
+    assert_eq!(
+        base(json!({"bootRecoverySecs": 20})).boot_recovery_after(),
+        Some(std::time::Duration::from_secs(20))
+    );
+    // Too short to let a healthy start reach notifyAppReady: raised.
+    assert_eq!(
+        base(json!({"bootRecoverySecs": 1})).boot_recovery_after(),
+        Some(std::time::Duration::from_secs(5))
+    );
+    // A dark-shipped plugin never recovers.
+    assert_eq!(
+        base(json!({"bootRecoverySecs": 20, "enabled": false})).boot_recovery_after(),
+        None
+    );
+}

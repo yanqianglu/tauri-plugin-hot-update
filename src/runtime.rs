@@ -11,6 +11,7 @@
 //! served (a trial boot without a persisted marker could evade rollback).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use semver::Version;
@@ -26,6 +27,9 @@ use crate::{Error, Result};
 #[derive(Default)]
 pub(crate) struct Shared {
     activation: OnceLock<Activation>,
+    /// Set when the page called `notify_app_ready` in this process: the page
+    /// got far enough to start. Read by boot recovery ([`crate::recovery`]).
+    page_acked: AtomicBool,
 }
 
 /// What the provider serves right now. Set at boot resolution and replaced
@@ -80,6 +84,11 @@ impl Shared {
     /// `None` before activation: the fail-safe default is embedded.
     pub(crate) fn active_dir(&self) -> Option<PathBuf> {
         self.activation.get()?.current().active_dir
+    }
+
+    /// True once the page has called `notify_app_ready` in this process.
+    pub(crate) fn page_acked(&self) -> bool {
+        self.page_acked.load(Ordering::SeqCst)
     }
 
     pub(crate) fn is_activated(&self) -> bool {
@@ -224,6 +233,8 @@ impl HotUpdate {
     /// a value re-read from disk — so a download that finished mid-session
     /// stays staged for its own trial boot. Idempotent.
     pub fn notify_app_ready(&self) -> Result<AckOutcome> {
+        // Recorded even if the commit below fails: the page is running.
+        self.shared.page_acked.store(true, Ordering::SeqCst);
         let activation = self.shared.activation()?;
         let booted = activation.current().active;
         let (outcome, effects) = activation.store.update(|state| {
