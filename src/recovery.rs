@@ -8,7 +8,7 @@
 //! time, the plugin runs the same check/download pipeline itself, switches to
 //! the staged bundle and asks the app to reload the webview.
 //!
-//! It tries once per process. The switched-to bundle goes through the
+//! It switches at most once per process (a failed check is retried a few times). The switched-to bundle goes through the
 //! ordinary `staged → booting → committed` path, so a bad fix is rolled back
 //! like any other bundle. A page that acks while the download is still
 //! running is left alone: the bundle stays staged for its own trial boot.
@@ -52,42 +52,83 @@ pub(crate) async fn recover_once(hot_update: &HotUpdate, config: &UpdateConfig) 
         return Recovery::NoUpdate;
     }
     // The download can take a while; a page that came up meanwhile is not
-    // reloaded out from under the reader.
+    // reloaded out from under the reader. The gate makes "no ack yet" and the
+    // switch one step: an ack cannot slip in between.
+    let _gate = hot_update.shared.gate();
     if hot_update.shared.page_acked() {
         return Recovery::StagedOnly;
     }
     match hot_update.apply_staged() {
-        Ok(ApplyOutcome::Applied { .. }) => Recovery::Switched,
+        Ok(ApplyOutcome::Applied { .. }) => {
+            hot_update.shared.set_reload_pending(true);
+            Recovery::Switched
+        }
         Ok(ApplyOutcome::TrialPending) => Recovery::StagedOnly,
         Ok(ApplyOutcome::NothingStaged | ApplyOutcome::NotApplicable) => Recovery::NoUpdate,
         Err(e) => Recovery::Failed(e.to_string()),
     }
 }
 
-/// Wait `after`, then run one recovery pass and reload the webviews if it
-/// switched bundles. Spawned once by the plugin setup hook.
+/// Pauses between attempts when the check itself fails (offline, flaky
+/// network): a phone often starts with no connection.
+const RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+];
+
+/// Only our own pages are reloaded: an OAuth or other remote page in another
+/// window is not ours to touch.
+fn is_app_page(url: &tauri::Url) -> bool {
+    url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
+}
+
+/// Wait `after`, then run recovery passes (retrying a failed check a few
+/// times) and reload the app's webviews if a pass switched bundles. Spawned
+/// once by the plugin setup hook.
 pub(crate) async fn run<R: Runtime>(
     app: AppHandle<R>,
     hot_update: HotUpdate,
     config: UpdateConfig,
     after: Duration,
 ) {
-    tokio::time::sleep(after).await;
-    match recover_once(&hot_update, &config).await {
-        Recovery::PageIsFine => {}
-        Recovery::Switched => {
-            log::warn!("hot-update: page never acked; switched to a newer bundle, reloading");
-            for (label, window) in app.webview_windows() {
-                if let Err(e) = window.eval("window.location.reload()") {
-                    log::warn!("hot-update: reload of window {label} failed: {e}");
+    let mut wait = after;
+    for attempt in 0..=RETRY_DELAYS.len() {
+        tokio::time::sleep(wait).await;
+        match recover_once(&hot_update, &config).await {
+            Recovery::PageIsFine => return,
+            Recovery::Switched => {
+                log::warn!("hot-update: page never acked; switched to a newer bundle, reloading");
+                for (label, window) in app.webview_windows() {
+                    let ours = window.url().map(|url| is_app_page(&url)).unwrap_or(true);
+                    if !ours {
+                        continue;
+                    }
+                    if let Err(e) = window.reload() {
+                        log::warn!("hot-update: reload of window {label} failed: {e}");
+                    }
+                }
+                return;
+            }
+            Recovery::StagedOnly => {
+                log::info!("hot-update: boot recovery staged a bundle; it boots next launch");
+                return;
+            }
+            Recovery::NoUpdate => {
+                log::info!("hot-update: boot recovery found no applicable update");
+                return;
+            }
+            Recovery::Failed(e) => {
+                log::warn!(
+                    "hot-update: boot recovery attempt {} failed: {e}",
+                    attempt + 1
+                );
+                match RETRY_DELAYS.get(attempt) {
+                    Some(next) => wait = *next,
+                    None => return,
                 }
             }
         }
-        Recovery::StagedOnly => {
-            log::info!("hot-update: boot recovery staged a bundle; it boots next launch")
-        }
-        Recovery::NoUpdate => log::info!("hot-update: boot recovery found no applicable update"),
-        Recovery::Failed(e) => log::warn!("hot-update: boot recovery failed: {e}"),
     }
 }
 

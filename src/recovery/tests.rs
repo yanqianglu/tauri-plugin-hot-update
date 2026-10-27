@@ -97,3 +97,54 @@ async fn a_bundle_still_on_trial_is_staged_but_not_stacked() {
         Version::parse("1.1.1").unwrap()
     );
 }
+
+#[tokio::test]
+async fn the_old_page_cannot_commit_the_bundle_it_never_ran() {
+    let fx = Fixture::new();
+    fx.publish("1.1.1", "1.0.0");
+    let hot_update = boot(&fx.root, "1.0.0");
+
+    assert_eq!(
+        recover_once(&hot_update, &fx.config()).await,
+        Recovery::Switched
+    );
+    // The switch is armed on disk before anything reloads.
+    assert_eq!(fx.state()["booting"], 1);
+
+    // A slow page from before the switch acks now: ignored.
+    assert!(matches!(
+        hot_update.notify_app_ready().unwrap(),
+        crate::machine::AckOutcome::Stale(_)
+    ));
+    assert_eq!(fx.state()["booting"], 1, "still on trial");
+    assert!(fx.state()["committed"].is_null());
+
+    // The webview starts loading again (what the page-load hook reports):
+    // the new page's ack commits the bundle.
+    hot_update.shared.set_reload_pending(false);
+    assert!(matches!(
+        hot_update.notify_app_ready().unwrap(),
+        crate::machine::AckOutcome::Committed(1)
+    ));
+    assert_eq!(fx.state()["committed"], 1);
+}
+
+#[tokio::test]
+async fn an_ack_before_the_switch_wins_and_nothing_is_switched() {
+    let fx = Fixture::new();
+    fx.publish("1.1.1", "1.0.0");
+    let hot_update = boot(&fx.root, "1.0.0");
+    // The check runs while the page is still unacked...
+    hot_update
+        .check_and_download(&fx.config(), |_, _| {})
+        .await
+        .unwrap();
+    // ...and the page comes up before the switch step.
+    hot_update.notify_app_ready().unwrap();
+
+    let recovery = recover_once(&hot_update, &fx.config()).await;
+
+    assert_eq!(recovery, Recovery::PageIsFine);
+    assert_eq!(fx.state()["staged"], 1, "the bundle stays staged");
+    assert!(fx.state()["booting"].is_null());
+}
